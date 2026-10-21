@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "مذكرتي - حفظ الصفحات",
+  "version": "1.0.0",
+  "description": "احفظ المقالات والمواقع المفتوحة في مكتبة مذكرتي.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "action": {
+    "default_title": "حفظ الصفحة في مذكرتي",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}

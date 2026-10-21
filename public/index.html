@@ -1,0 +1,771 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f6f5">
+  <title>مذكرتي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <section id="authScreen" class="auth-screen hidden">
+    <form id="authForm" class="auth-card">
+      <span class="brand-mark">م</span>
+      <p class="eyebrow">مكتبتك الشخصية</p>
+      <h1 id="authTitle">تسجيل الدخول</h1>
+      <p id="authDescription" class="auth-description">سجّل الدخول للوصول إلى مكتبتك الخاصة.</p>
+      <label>اسم المستخدم
+        <input name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}" autocomplete="username" dir="ltr">
+      </label>
+      <label class="spaced">كلمة المرور
+        <input name="password" type="password" required minlength="12" maxlength="256" autocomplete="current-password" dir="ltr">
+      </label>
+      <p id="authError" class="auth-error hidden" role="alert"></p>
+      <button id="authSubmit" class="button button-primary auth-submit" type="submit">تسجيل الدخول</button>
+      <button id="authModeToggle" class="auth-mode-toggle" type="button">إنشاء حساب جديد</button>
+    </form>
+  </section>
+  <div id="appShell" class="app-shell hidden">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="الرئيسية">
+      <span class="brand-mark">م</span>
+      <span><strong>مذكرتي</strong><small>مساحتك الشخصية</small></span>
+    </a>
+    <div class="global-search">
+      <svg class="search-glyph" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+      <input id="globalSearch" type="search" dir="auto" aria-label="بحث شامل في المكتبة والمهام والمقالات والروابط المهمة" placeholder="بحث شامل في المكتبة والمهام والمقالات والروابط المهمة">
+      <kbd>Ctrl K</kbd>
+      <div id="globalSearchResults" class="global-search-results hidden" role="region" aria-live="polite" aria-label="نتائج البحث"></div>
+    </div>
+    <div class="top-actions">
+      <details id="accountMenu" class="account-menu">
+        <summary id="accountMenuButton" aria-label="قائمة الحساب">
+          <span class="account-avatar" aria-hidden="true">م</span>
+          <span id="userName" class="user-name"></span>
+          <span class="account-menu-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="account-menu-panel">
+          <button id="settingsButton" type="button"><span aria-hidden="true">⚙</span> الإعدادات</button>
+          <button id="logoutButton" type="button"><span aria-hidden="true">↪</span> تسجيل الخروج</button>
+        </div>
+      </details>
+      <button id="openLookupPanel" class="button button-quiet" type="button">⌕ بحث عن عنوان</button>
+      <button id="focusModeToggle" class="button button-quiet focus-mode-toggle" type="button" aria-pressed="false" title="إخفاء عناصر الواجهة المشتتة">◉ وضع هادئ</button>
+      <div class="notification-center">
+        <button id="notificationsButton" class="notifications-button" type="button" aria-expanded="false" aria-controls="notificationsPanel" aria-label="الإشعارات">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+          <span id="notificationCount" class="notification-count hidden" aria-hidden="true"></span>
+        </button>
+        <div id="notificationsPanel" class="notifications-panel hidden" role="region" aria-label="الإشعارات والتذكيرات">
+          <div class="notifications-panel-heading"><strong>الإشعارات والتذكيرات</strong><span id="notificationSummary"></span></div>
+          <button id="markAllNotificationsRead" class="mark-notifications-read" type="button">وضع علامة مقروء على الكل</button>
+          <div id="notificationsList" class="notifications-list" aria-live="polite"></div>
+        </div>
+      </div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="تفعيل المظهر الداكن" title="تفعيل المظهر الداكن">🌙</button>
+      <button id="addItem" class="button button-primary" type="button">＋ إنشاء</button>
+    </div>
+  </header>
+  <main class="container app-layout">
+    <nav id="workspaceNav" class="workspace-nav" aria-label="أقسام مساحة العمل">
+      <p class="rail-label">مساحة العمل</p>
+      <a class="workspace-nav-link active" href="#today" aria-current="page" aria-label="اليوم"><span aria-hidden="true">◷</span><span class="workspace-nav-label">اليوم</span></a>
+      <div class="workspace-nav-group">
+        <span>التنظيم</span>
+        <a class="workspace-nav-link" href="#todos" aria-label="المهام"><span aria-hidden="true">☑</span><span class="workspace-nav-label">المهام</span></a>
+        <a class="workspace-nav-link" href="#calendar" aria-label="التقويم"><span aria-hidden="true">▦</span><span class="workspace-nav-label">التقويم</span></a>
+        <a class="workspace-nav-link" href="#planning" aria-label="الأهداف والمشاريع"><span aria-hidden="true">◎</span><span class="workspace-nav-label">الأهداف والمشاريع</span></a>
+        <a class="workspace-nav-link" href="#habits" aria-label="العادات والروتين"><span aria-hidden="true">↻</span><span class="workspace-nav-label">العادات والروتين</span></a>
+      </div>
+      <div class="workspace-nav-group">
+        <span>مجموعاتك</span>
+        <a class="workspace-nav-link" href="#library" aria-label="مكتبتي"><span aria-hidden="true">▤</span><span class="workspace-nav-label">مكتبتي</span></a>
+        <a class="workspace-nav-link" href="#articles" aria-label="للقراءة لاحقاً"><span aria-hidden="true">↗</span><span class="workspace-nav-label">للقراءة لاحقاً</span></a>
+        <a class="workspace-nav-link" href="#bookmarks" aria-label="الروابط المهمة"><span aria-hidden="true">☆</span><span class="workspace-nav-label">الروابط المهمة</span></a>
+        <a class="workspace-nav-link" href="#timeline" aria-label="الخط الزمني"><span aria-hidden="true">⌁</span><span class="workspace-nav-label">الخط الزمني</span></a>
+        <a class="workspace-nav-link" href="#clubs" aria-label="نادي الكتاب"><span aria-hidden="true">♧</span><span class="workspace-nav-label">نادي الكتاب</span></a>
+      </div>
+      <div class="workspace-nav-group">
+        <span>مساحتك الهادئة</span>
+        <a class="workspace-nav-link" href="#daily-notes" aria-label="مذكرة اليوم"><span aria-hidden="true">✎</span><span class="workspace-nav-label">مذكرة اليوم</span></a>
+        <a class="workspace-nav-link" href="#pinned" aria-label="المثبتة"><span aria-hidden="true">⌖</span><span class="workspace-nav-label">المثبتة</span></a>
+        <a class="workspace-nav-link" href="#gallery" aria-label="معرض الصور"><span aria-hidden="true">▧</span><span class="workspace-nav-label">معرض الصور</span></a>
+      </div>
+      <div class="rail-note"><span aria-hidden="true">✦</span><p>خطوة صغيرة اليوم تصنع فرقاً كبيراً غداً.</p></div>
+    </nav>
+    <div class="workspace-content">
+    <section class="welcome">
+      <div>
+        <p class="eyebrow">مساحتك الشخصية</p>
+        <h1>رتّب يومك، واحتفظ بما يهمك.</h1>
+        <p class="welcome-copy">خطط لخطوتك التالية واجمع أفكارك وقراءتك في مكان واحد.</p>
+        <div class="welcome-actions">
+          <button class="button button-primary" type="button" data-shortcut="todo">＋ أضف مهمة</button>
+          <button class="button button-quiet" type="button" data-shortcut="item">أضف إلى مكتبتك</button>
+          <button class="welcome-link" type="button" data-shortcut="article">احفظ رابطاً ↗</button>
+        </div>
+      </div>
+      <div class="welcome-art" aria-hidden="true"><span>م</span><i>✦</i></div>
+    </section>
+
+    <section id="dashboard" class="dashboard-section" aria-labelledby="dashboardHeading">
+      <div class="section-heading dashboard-heading">
+        <div><p class="eyebrow">أرقامك في لمحة</p><h2 id="dashboardHeading">ملخص نشاطك</h2></div>
+      </div>
+      <section id="stats" class="stats" aria-label="ملخص مكتبتك"></section>
+      <section id="overdueNotice" class="overdue-notice hidden" role="alert"></section>
+      <section id="weeklyReview" class="weekly-review" aria-live="polite"></section>
+    </section>
+
+    <section id="today" class="workspace-section" aria-labelledby="todayHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">خطتك القابلة للتنفيذ</p><h2 id="todayHeading">اليوم</h2><p id="todayDate" class="field-hint"></p></div>
+        <div class="today-actions">
+          <button id="quickAddTodo" class="button button-primary" type="button">＋ مهمة</button>
+          <button id="quickAddEvent" class="button button-quiet" type="button">＋ موعد</button>
+        </div>
+      </div>
+      <form id="quickCaptureForm" class="quick-capture">
+        <input name="title" required maxlength="200" dir="auto" aria-label="فكرة أو مهمة جديدة" placeholder="التقط فكرة أو مهمة بسرعة...">
+        <select name="type" aria-label="نوع الالتقاط"><option value="task">مهمة</option><option value="note">مذكرة</option></select>
+        <button class="button button-quiet" type="submit">التقاط سريع</button>
+      </form>
+      <div class="today-grid">
+        <article class="today-panel"><h3>مواعيد اليوم</h3><div id="todayEvents" class="today-list"></div></article>
+        <article class="today-panel"><h3>مهام اليوم</h3><div id="todayTasks" class="today-list"></div></article>
+        <article class="today-panel"><h3>عاداتك اليوم</h3><div id="todayHabits" class="today-list"></div></article>
+        <article class="today-panel"><h3>روتين اليوم</h3><div id="todayRoutines" class="today-list"></div></article>
+      </div>
+    </section>
+
+    <section id="calendar" class="workspace-section" aria-labelledby="calendarHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">خطط حسب اليوم</p><h2 id="calendarHeading">التقويم</h2></div>
+        <button id="addEventButton" class="button button-primary" type="button">＋ إضافة موعد</button>
+      </div>
+      <div id="calendarList" class="calendar-workspace" aria-live="polite"></div>
+    </section>
+
+    <section id="planning" class="workspace-section" aria-labelledby="planningHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">اربط اليوم بما يهمك على المدى البعيد</p><h2 id="planningHeading">مجالات الحياة والأهداف والمشاريع</h2></div>
+        <div class="today-actions">
+          <button id="addAreaButton" class="button button-quiet" type="button">＋ مجال</button>
+          <button id="addGoalButton" class="button button-quiet" type="button">＋ هدف</button>
+          <button id="addProjectButton" class="button button-primary" type="button">＋ مشروع</button>
+        </div>
+      </div>
+      <div id="planningBoard" class="planning-board" aria-live="polite"></div>
+    </section>
+
+    <section id="habits" class="workspace-section" aria-labelledby="habitsHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">ثبات بسيط، أثر كبير</p><h2 id="habitsHeading">العادات والروتين</h2><p id="habitsTodayDate" class="field-hint"></p></div>
+        <button id="addHabitButton" class="button button-primary" type="button">＋ عادة جديدة</button>
+      </div>
+      <div id="habitProgressSummary" class="habit-progress-summary"></div>
+      <section id="achievementBoard" class="achievement-board" aria-labelledby="achievementHeading" aria-live="polite"></section>
+      <div class="habit-workspace-grid">
+        <section class="habit-tracker-panel" aria-labelledby="habitListHeading">
+          <div class="habit-panel-heading"><div><h3 id="habitListHeading">عادات اليوم</h3><p>علّم ما أنجزته، فكل يوم يُحتسب.</p></div><span id="habitWeekLabel"></span></div>
+          <div id="habitsList" class="habit-list"></div>
+        </section>
+        <section class="routine-tracker-panel" aria-labelledby="routineListHeading">
+          <div class="habit-panel-heading"><div><h3 id="routineListHeading">روتينك اليومي</h3><p>اجمع الخطوات الصغيرة في بداية أو نهاية يومك.</p></div>
+            <button id="addRoutineButton" class="small-button" type="button">＋ روتين</button></div>
+          <div id="routinesList" class="routine-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="todos" class="workspace-section" aria-labelledby="todosHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">خطواتك القادمة</p><h2 id="todosHeading">المهام</h2></div>
+      </div>
+      <nav class="todo-filters" aria-label="تصفية المهام">
+        <button class="todo-filter active" type="button" data-todo-filter="all" aria-pressed="true">الكل <span id="todoCountAll">٠</span></button>
+        <button class="todo-filter" type="button" data-todo-filter="today" aria-pressed="false">اليوم <span id="todoCountToday">٠</span></button>
+        <button class="todo-filter" type="button" data-todo-filter="upcoming" aria-pressed="false">القادمة <span id="todoCountUpcoming">٠</span></button>
+        <button class="todo-filter" type="button" data-todo-filter="completed" aria-pressed="false">مكتملة <span id="todoCountCompleted">٠</span></button>
+      </nav>
+      <label class="todo-search"><svg class="search-glyph" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><input id="todoSearch" type="search" dir="auto" placeholder="ابحث في مهامك" aria-label="ابحث في المهام"></label>
+      <form id="quickTodoForm" class="quick-todo-form">
+        <label class="quick-todo-title"><span class="quick-todo-plus" aria-hidden="true">＋</span><input name="title" required maxlength="200" dir="auto" placeholder="أضف مهمة"></label>
+        <button id="quickTodoToday" class="task-date-shortcut" type="button" aria-label="موعد المهمة اليوم">اليوم</button>
+        <label class="task-date-input"><span class="sr-only">تاريخ الاستحقاق</span><input name="due_date" type="date" aria-label="تاريخ الاستحقاق"></label>
+        <details class="quick-todo-details">
+          <summary>تفاصيل</summary>
+          <div class="quick-todo-extra">
+            <label>الوقت<input name="due_time" type="time"></label>
+            <label>المشروع<select name="project_id" id="todoQuickProject"><option value="">بدون مشروع</option></select></label>
+            <label class="quick-todo-notes">ملاحظات<textarea name="notes" rows="2" maxlength="2000" dir="auto" placeholder="أضف تفاصيل للمهمة"></textarea></label>
+          </div>
+        </details>
+        <button class="button button-primary quick-todo-submit" type="submit">إضافة</button>
+      </form>
+      <div id="todosList" class="task-list" aria-live="polite"></div>
+    </section>
+
+    <section id="articles" class="workspace-section" aria-labelledby="articlesHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">اقرأها وراجعها لاحقاً</p><h2 id="articlesHeading">المقالات والمواقع</h2></div>
+        <button id="addArticleButton" class="button button-primary" type="button">＋ حفظ رابط</button>
+      </div>
+      <div id="articlesList" class="article-list" aria-live="polite"></div>
+    </section>
+
+    <section id="bookmarks" class="workspace-section" aria-labelledby="bookmarksHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">مساحة منظمة لمصادرك الأساسية</p><h2 id="bookmarksHeading">الروابط المهمة</h2><p id="bookmarksSummary" class="field-hint"></p></div>
+        <div class="bookmark-heading-actions">
+          <button id="pasteBookmarkButton" class="button button-quiet" type="button">لصق رابط</button>
+          <button id="addBookmarkButton" class="button button-primary" type="button">＋ حفظ رابط</button>
+        </div>
+      </div>
+      <label class="bookmark-search">
+        <svg class="search-glyph" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+        <input id="bookmarkSearch" type="search" dir="auto" placeholder="ابحث في عناوين الروابط وملاحظاتها" aria-label="البحث في الروابط المهمة">
+      </label>
+      <div id="bookmarksList" class="bookmark-list" aria-live="polite"></div>
+    </section>
+
+    <section id="timeline" class="workspace-section" aria-labelledby="timelineHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">أيامك كما عشتها، لا كقائمة مهام</p><h2 id="timelineHeading">الخط الزمني</h2><p id="timelineSummary" class="field-hint"></p></div>
+      </div>
+      <form id="timelineFilter" class="timeline-filter">
+        <label>من<input name="start" type="date"></label>
+        <label>إلى<input name="end" type="date"></label>
+        <button class="button button-primary" type="submit">عرض الفترة</button>
+      </form>
+      <div id="timelineList" class="timeline-list" aria-live="polite"></div>
+    </section>
+
+    <section id="clubs" class="workspace-section" aria-labelledby="clubsHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">اقرأوا معاً، وتبادلوا ما ألهمكم</p><h2 id="clubsHeading">نادي الكتاب</h2><p class="field-hint">نوادٍ خاصة بالدعوة، مع رف مشترك ودردشة ورؤى ولوحة إنجاز.</p></div>
+        <button id="createClubButton" class="button button-primary" type="button">＋ إنشاء نادٍ</button>
+      </div>
+      <div class="book-club-layout">
+        <aside id="bookClubList" class="book-club-list" aria-label="نواديك"></aside>
+        <section id="bookClubDetails" class="book-club-details" aria-live="polite"></section>
+      </div>
+    </section>
+
+    <section id="daily-notes" class="workspace-section daily-notes-page" aria-labelledby="dailyNotesHeading">
+      <div class="daily-notes-header">
+        <div><p class="eyebrow">مساحة هادئة لك</p><h2 id="dailyNotesHeading">مذكرة اليوم</h2><p>اكتب ما تريد فقط، واترك الباقي فارغاً.</p></div>
+        <div class="daily-note-header-actions">
+          <label class="daily-note-date">التاريخ<input id="dailyNoteDate" type="date" aria-label="تاريخ المذكرة"></label>
+          <button id="dailyNoteFocusToggle" class="button button-quiet" type="button" aria-pressed="false">◉ وضع الكتابة الهادئ</button>
+        </div>
+      </div>
+      <form id="dailyNoteForm" class="daily-note-editor">
+        <div class="daily-note-title-row">
+          <input name="title" maxlength="200" dir="auto" placeholder="عنوان اختياري لهذا اليوم" aria-label="عنوان المذكرة اليومية">
+          <button id="dailyNotePin" class="pin-toggle" type="button" aria-label="تثبيت مذكرة اليوم" title="تثبيت مذكرة اليوم"></button>
+        </div>
+        <div class="daily-note-prompts" aria-label="اقتراحات اختيارية">
+          <span>لو حابب تبدأ:</span>
+          <button type="button" data-daily-prompt="## ما يشغل بالي&#10;">ما يشغل بالي</button>
+          <button type="button" data-daily-prompt="## شيء أريد تذكره&#10;">شيء أريد تذكره</button>
+          <button type="button" data-daily-prompt="## فكرة عابرة&#10;">فكرة عابرة</button>
+        </div>
+        <div class="daily-note-toolbar markdown-toolbar">
+          <button type="button" data-daily-format="**نص عريض**" aria-label="نص عريض"><strong>B</strong></button>
+          <button type="button" data-daily-format="## عنوان" aria-label="إضافة عنوان">عنوان</button>
+          <button type="button" data-daily-format="- عنصر قائمة" aria-label="إضافة قائمة">قائمة</button>
+          <button type="button" data-daily-format="> اقتباس" aria-label="إضافة اقتباس">اقتباس</button>
+          <button id="dailyNoteImageButton" type="button">إدراج صورة</button>
+          <select id="dailyNoteLinkPicker" aria-label="إضافة رابط داخلي"><option value="">ربط بملاحظة...</option></select>
+          <button id="dailyNotePreviewToggle" type="button" aria-pressed="false">معاينة</button>
+          <input id="dailyNoteImageUpload" class="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+        </div>
+        <textarea name="body" id="dailyNoteBody" class="markdown-input daily-note-body" rows="17" maxlength="50000" dir="auto" placeholder="اكتب بحرية... يمكنك ربط ملاحظة أخرى من القائمة أو كتابة [[item:ID|عنوان]] أو [[daily:YYYY-MM-DD|عنوان]]."></textarea>
+        <div id="dailyNotePreview" class="markdown-preview daily-note-preview hidden"></div>
+        <div class="daily-note-footer"><span id="dailyNoteSaveStatus" role="status">كل شيء اختياري. سيتم حفظ تغييراتك تلقائياً.</span><button class="button button-primary" type="submit">حفظ الآن</button></div>
+      </form>
+      <section class="backlinks-panel"><div class="backlinks-heading"><h3>روابط عائدة</h3><span>ملاحظات تشير إلى هذا اليوم</span></div><div id="dailyNoteBacklinks"></div></section>
+    </section>
+
+    <section id="pinned" class="workspace-section" aria-labelledby="pinnedHeading">
+      <div class="section-heading"><div><p class="eyebrow">ما تريد الرجوع إليه بسرعة</p><h2 id="pinnedHeading">المثبتة</h2><p class="field-hint">ثبّت الملاحظات والكتب والمقالات والروابط المهمة.</p></div></div>
+      <div id="pinnedList" class="pinned-list" aria-live="polite"></div>
+    </section>
+
+    <section id="gallery" class="workspace-section" aria-labelledby="galleryHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">صورك الخاصة، مرتبة كما تحب</p><h2 id="galleryHeading">معرض الصور</h2><p id="gallerySummary" class="field-hint"></p></div>
+        <button id="galleryUploadButton" class="button button-primary" type="button">＋ إضافة صورة</button>
+      </div>
+      <input id="galleryUploadInput" class="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+      <div class="gallery-toolbar"><label>تصنيف الصورة<input id="galleryUploadCategory" list="galleryCategoryOptions" maxlength="40" value="شخصي" placeholder="مثال: فن، شخصي"></label>
+        <datalist id="galleryCategoryOptions"></datalist><label>وصف اختياري<input id="galleryUploadCaption" maxlength="200" dir="auto" placeholder="أضف كلمة تساعدك على تذكرها"></label>
+        <label>عرض تصنيف<select id="galleryCategoryFilter"><option value="">كل الصور</option></select></label></div>
+      <div id="galleryGrid" class="gallery-grid" aria-live="polite"></div>
+    </section>
+
+    <section id="library" class="library">
+      <div class="library-heading">
+        <div>
+          <p class="eyebrow">مكتبتك الشخصية</p>
+          <h2>كل ما تحتفظ به</h2>
+        </div>
+        <label class="search">
+          <svg class="search-glyph" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+          <input id="search" type="search" dir="auto" placeholder="ابحث بالعنوان أو المؤلف أو الوسوم">
+        </label>
+      </div>
+
+      <nav id="filters" class="filters" aria-label="تصفية حسب النوع">
+        <button class="filter active" data-kind="all">الكل</button>
+        <button class="filter" data-kind="book">📚 كتب</button>
+        <button class="filter" data-kind="game">🎮 ألعاب</button>
+        <button class="filter" data-kind="movie">🎬 أفلام</button>
+        <button class="filter" data-kind="memo">✍️ مذكرات</button>
+      </nav>
+      <div class="library-filters" aria-label="تصفية إضافية">
+        <label>الحالة
+          <select id="statusFilter"><option value="all">كل الحالات</option><option value="planned">في القائمة</option><option value="in_progress">أتابعه حالياً</option><option value="completed">أنهيته</option><option value="paused">متوقف مؤقتاً</option><option value="dropped">لم أكمله</option></select>
+        </label>
+        <label>التقييم
+          <select id="ratingFilter"><option value="all">كل التقييمات</option><option value="5">٥ نجوم</option><option value="4">٤ نجوم فأكثر</option><option value="3">٣ نجوم فأكثر</option><option value="2">نجمتان فأكثر</option><option value="1">نجمة فأكثر</option><option value="unrated">بدون تقييم</option></select>
+        </label>
+        <label>الوسم<input id="tagFilter" type="search" dir="auto" placeholder="مثال: مفضل"></label>
+      </div>
+
+      <div id="items" class="items" aria-live="polite"></div>
+    </section>
+    <section id="detailPage" class="detail-page hidden" aria-live="polite"></section>
+    </div>
+  </main>
+
+  <dialog id="quickCreateDialog" class="dialog quick-create-dialog">
+    <div class="dialog-card quick-create-card">
+      <div class="dialog-heading"><div><p class="eyebrow">إنشاء جديد</p><h2>ماذا تريد أن تضيف؟</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <button class="quick-create-option" type="button" data-create-action="todo"><span aria-hidden="true">☑</span><span><strong>مهمة</strong><small>سجّل خطوة تحتاج إلى إنجاز</small></span></button>
+      <button class="quick-create-option" type="button" data-create-action="item"><span aria-hidden="true">▤</span><span><strong>كتاب أو فيلم أو مذكرة</strong><small>أضف شيئاً إلى مكتبتك</small></span></button>
+      <button class="quick-create-option" type="button" data-create-action="article"><span aria-hidden="true">↗</span><span><strong>رابط للقراءة لاحقاً</strong><small>احفظ مقالاً أو صفحة ويب</small></span></button>
+      <button class="quick-create-option" type="button" data-create-action="event"><span aria-hidden="true">▦</span><span><strong>موعد</strong><small>خطط لوقت محدد</small></span></button>
+    </div>
+  </dialog>
+
+  <div id="lookupBackdrop" class="panel-backdrop hidden"></div>
+  <aside id="lookupPanel" class="side-panel" aria-label="البحث عن عنوان" aria-hidden="true">
+    <div class="dialog-heading">
+      <div><p class="eyebrow">اكتشف وأضف إلى مكتبتك</p><h2>بحث عن عنوان</h2></div>
+      <button type="button" id="closeLookupPanel" class="icon-button" aria-label="إغلاق">×</button>
+    </div>
+    <label>النوع
+      <select id="panelKind"><option value="book">كتاب</option><option value="movie">فيلم</option><option value="game">لعبة</option></select>
+    </label>
+    <label class="spaced">العنوان
+      <input id="panelQuery" maxlength="200" placeholder="اكتب اسم الكتاب أو الفيلم أو اللعبة">
+    </label>
+    <button id="panelSearchButton" class="button button-primary panel-search-button" type="button">بحث</button>
+    <p id="panelHint" class="panel-hint">اختر نتيجة لفتح نموذج إضافة جاهز بالعنوان والغلاف.</p>
+    <div id="panelResults" class="panel-results" aria-live="polite"></div>
+  </aside>
+
+  <dialog id="itemDialog" class="dialog">
+    <form id="itemForm" class="dialog-card">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">مساحتك الشخصية</p><h2 id="dialogTitle">إضافة عنصر</h2></div>
+        <button type="button" class="icon-button" data-close aria-label="إغلاق">×</button>
+      </div>
+      <div class="form-grid">
+        <label>النوع
+          <select name="kind" id="kind">
+            <option value="memo">مذكرة</option><option value="book">كتاب</option>
+            <option value="game">لعبة</option><option value="movie">فيلم</option>
+          </select>
+        </label>
+        <label class="wide">العنوان <span class="required">*</span><input name="title" id="itemTitle" required maxlength="200" placeholder="اسم الكتاب أو الفكرة"></label>
+        <div id="lookupTools" class="wide lookup-tools">
+          <button id="lookupButton" class="button button-quiet" type="button">⌕ البحث عن معلومات وصورة</button>
+          <span id="lookupHint">ابحث عن الكتاب أو الفيلم أو اللعبة قبل الحفظ.</span>
+        </div>
+        <div id="lookupResults" class="wide lookup-results" aria-live="polite"></div>
+        <div id="coverField" class="wide cover-field">
+          <span class="cover-field-label">صورة الغلاف</span>
+          <div id="coverPasteTarget" class="cover-upload-area" tabindex="0" role="group" aria-label="منطقة إضافة صورة الغلاف">
+            <span class="cover-upload-icon" aria-hidden="true">▧</span>
+            <strong>أضف صورة الغلاف</strong>
+            <span class="cover-upload-hint">اختر صورة أو الصقها مباشرة من الحافظة</span>
+            <div class="cover-upload-actions">
+              <button id="chooseCoverButton" class="small-button" type="button">اختيار صورة</button>
+              <button id="pasteCoverButton" class="small-button" type="button">لصق من الحافظة</button>
+            </div>
+            <input id="coverUpload" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+          </div>
+          <input name="cover_image" type="hidden">
+          <span id="coverPasteHint" class="field-hint" role="status">يمكنك أيضاً اختيار صورة الغلاف من نتائج البحث. الحد الأقصى ٥ ميغابايت.</span>
+          <img id="coverPreview" class="cover-preview hidden" alt="معاينة صورة الغلاف">
+          <button id="removeCover" class="small-button hidden" type="button">إزالة الصورة</button>
+        </div>
+        <label id="creatorLabel">المؤلف / المطور / المخرج<input name="creator" maxlength="200" placeholder="اختياري"></label>
+        <label>الحالة
+          <select name="status">
+            <option value="planned">في القائمة</option><option value="in_progress">أتابعه حالياً</option>
+            <option value="completed">أنهيته</option><option value="paused">متوقف مؤقتاً</option><option value="dropped">لم أكمله</option>
+          </select>
+        </label>
+        <label class="wide" id="progressField">التقدم الحالي<input name="progress" maxlength="200" placeholder="مثال: صفحة ١٢٠، الموسم الثاني، ٨ ساعات"></label>
+        <label id="nearCompletionField" class="wide checkbox-field"><input name="near_completion" type="checkbox"> قارب على الانتهاء</label>
+        <label id="ratingField">تقييمي
+          <select name="rating"><option value="">بدون تقييم</option><option value="1">★☆☆☆☆</option><option value="2">★★☆☆☆</option><option value="3">★★★☆☆</option><option value="4">★★★★☆</option><option value="5">★★★★★</option></select>
+        </label>
+        <label>بدأت في<input name="started_on" type="date"></label>
+        <label>أنهيت في<input name="finished_on" type="date"></label>
+        <label class="wide" id="tagsField">وسوم، افصل بينها بفواصل<input name="tags" maxlength="300" placeholder="خيال، مفضل، أريد إعادة قراءته"></label>
+        <label class="wide markdown-field" id="reviewField">مراجعتي (Markdown)
+          <div class="markdown-toolbar">
+            <button type="button" data-markdown-format="**نص عريض**" aria-label="نص عريض"><strong>B</strong></button>
+            <button type="button" data-markdown-format="*نص مائل*" aria-label="نص مائل"><em>I</em></button>
+            <button type="button" data-markdown-format="# عنوان" aria-label="عنوان">عنوان</button>
+            <button type="button" data-markdown-format="- عنصر قائمة" aria-label="قائمة">قائمة</button>
+            <button type="button" data-markdown-format="> اقتباس" aria-label="اقتباس">اقتباس</button>
+            <button type="button" data-markdown-format="[نص الرابط](https://example.com)" aria-label="إضافة رابط">رابط</button>
+            <button id="reviewImageButton" type="button">إدراج صورة</button>
+            <button id="reviewPreviewToggle" type="button" aria-pressed="false">معاينة</button>
+            <input id="reviewImageUpload" class="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+          </div>
+          <textarea name="review" id="reviewInput" class="markdown-input" dir="auto" rows="5" maxlength="5000" placeholder="اكتب مراجعتك... يمكنك استخدام Markdown، أو اسحب صورة إلى مساحة الكتابة."></textarea>
+          <div id="reviewPreview" class="markdown-preview hidden"></div>
+        </label>
+        <label class="wide markdown-field" id="notesLabel">ملاحظات شخصية (Markdown)
+          <div class="markdown-toolbar">
+            <button type="button" data-markdown-format="**نص عريض**" aria-label="نص عريض"><strong>B</strong></button>
+            <button type="button" data-markdown-format="*نص مائل*" aria-label="نص مائل"><em>I</em></button>
+            <button type="button" data-markdown-format="## عنوان" aria-label="عنوان">عنوان</button>
+            <button type="button" data-markdown-format="- عنصر قائمة" aria-label="قائمة">قائمة</button>
+            <button type="button" data-markdown-format="> اقتباس" aria-label="اقتباس">اقتباس</button>
+            <button type="button" data-markdown-format="[نص الرابط](https://example.com)" aria-label="إضافة رابط">رابط</button>
+            <button id="notesImageButton" type="button">إدراج صورة</button>
+            <input id="notesImageUpload" class="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+          </div>
+          <textarea name="notes" id="notesInput" class="markdown-input" dir="auto" rows="5" maxlength="10000" placeholder="اكتب ملاحظاتك بتنسيق Markdown..."></textarea>
+          <div id="notesPreview" class="markdown-preview hidden"></div>
+          <button type="button" class="preview-toggle" data-preview="notes">معاينة الملاحظات</button>
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="button button-quiet" data-close>إلغاء</button>
+        <button class="button button-primary" type="submit">حفظ</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="todoDialog" class="dialog">
+    <form id="todoForm" class="dialog-card">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">خطواتك القادمة</p><h2 id="todoDialogTitle">إضافة مهمة</h2></div>
+        <button type="button" class="icon-button" data-close aria-label="إغلاق">×</button>
+      </div>
+      <input name="id" type="hidden">
+      <label>المهمة<input name="title" required maxlength="200" dir="auto" placeholder="مثال: إنهاء الفصل الأخير"></label>
+      <label class="spaced">موعد الاستحقاق<input name="due_date" type="date"></label>
+      <label class="spaced">وقت التنبيه<input name="due_time" type="time"></label>
+      <label class="spaced">التكرار
+        <select name="recurrence"><option value="none">بدون تكرار</option><option value="daily">يومياً</option><option value="weekly">أسبوعياً</option><option value="monthly">شهرياً</option></select>
+      </label>
+      <label class="spaced">المشروع المرتبط
+        <select name="project_id" id="todoProject"><option value="">بدون مشروع</option></select>
+      </label>
+      <label class="spaced">ملاحظات<textarea name="notes" rows="3" maxlength="2000" dir="auto" placeholder="اختياري"></textarea></label>
+      <label class="checkbox-field"><input name="completed" type="checkbox"> تم إنجازها</label>
+      <div class="dialog-actions">
+        <button type="button" class="button button-quiet" data-close>إلغاء</button>
+        <button class="button button-primary" type="submit">حفظ المهمة</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="eventDialog" class="dialog">
+    <form id="eventForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">تخطيط الوقت</p><h2 id="eventDialogTitle">إضافة موعد</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <input name="id" type="hidden">
+      <label>اسم الموعد<input name="title" required maxlength="200" dir="auto"></label>
+      <label class="spaced">البداية<input name="starts_at" type="datetime-local" required></label>
+      <label class="spaced">النهاية<input name="ends_at" type="datetime-local"></label>
+      <label class="checkbox-field"><input name="all_day" type="checkbox"> حدث طوال اليوم</label>
+      <label class="spaced">التكرار<select name="recurrence"><option value="none">مرة واحدة</option><option value="daily">يومياً</option><option value="weekly">أسبوعياً</option><option value="monthly">شهرياً</option></select></label>
+      <label class="spaced">ملاحظات<textarea name="description" rows="3" maxlength="2000" dir="auto"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ الموعد</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="areaDialog" class="dialog">
+    <form id="areaForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">الحياة المتوازنة</p><h2>إضافة مجال حياة</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <label>اسم المجال<input name="name" required maxlength="80" dir="auto" placeholder="مثال: الصحة، الأسرة، العمل"></label>
+      <label class="spaced">لون المجال<input name="color" type="color" value="#397e75"></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ المجال</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="goalDialog" class="dialog">
+    <form id="goalForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">نتيجة ذات معنى</p><h2>إضافة هدف</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <label>الهدف<input name="title" required maxlength="200" dir="auto" placeholder="مثال: إكمال دورة البرمجة"></label>
+      <label class="spaced">مجال الحياة<select name="area_id" id="goalArea"><option value="">بدون مجال</option></select></label>
+      <label class="spaced">تاريخ مستهدف<input name="target_date" type="date"></label>
+      <label class="spaced">الحالة<select name="status"><option value="active">نشط</option><option value="planned">مخطط له</option><option value="completed">مكتمل</option></select></label>
+      <label class="spaced">وصف أو معيار النجاح<textarea name="description" rows="3" maxlength="2000" dir="auto"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ الهدف</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="projectDialog" class="dialog">
+    <form id="projectForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">حوّل الهدف إلى عمل ملموس</p><h2>إضافة مشروع</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <label>اسم المشروع<input name="title" required maxlength="200" dir="auto"></label>
+      <label class="spaced">مجال الحياة<select name="area_id" id="projectArea"><option value="">بدون مجال</option></select></label>
+      <label class="spaced">الهدف المرتبط<select name="goal_id" id="projectGoal"><option value="">بدون هدف</option></select></label>
+      <label class="spaced">الخطوة التالية<input name="next_action" maxlength="300" dir="auto" placeholder="الإجراء الصغير التالي"></label>
+      <label class="spaced">موعد مستهدف<input name="due_date" type="date"></label>
+      <label class="spaced">الحالة<select name="status"><option value="active">نشط</option><option value="on_hold">مؤجل</option><option value="completed">مكتمل</option></select></label>
+      <label class="spaced">تفاصيل<textarea name="description" rows="3" maxlength="2000" dir="auto"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ المشروع</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="habitDialog" class="dialog">
+    <form id="habitForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">تقدم صغير ومستمر</p><h2>إضافة عادة</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <label>العادة<input name="title" required maxlength="120" dir="auto" placeholder="مثال: المشي"></label>
+      <label class="spaced">الجدول<select name="frequency"><option value="daily">يومية</option><option value="weekly">أسبوعية</option></select></label>
+      <label class="spaced">الهدف الأسبوعي (أيام)<input name="target_per_week" type="number" min="1" max="7" value="7" required></label>
+      <label class="spaced">ملاحظات<textarea name="notes" rows="2" maxlength="500" dir="auto"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ العادة</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="routineDialog" class="dialog">
+    <form id="routineForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">اجعل البداية أسهل</p><h2>إضافة روتين</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <label>اسم الروتين<input name="title" required maxlength="120" dir="auto" placeholder="مثال: بداية يوم هادئة"></label>
+      <label class="spaced">وصف<textarea name="description" rows="2" maxlength="500" dir="auto"></textarea></label>
+      <label class="spaced">الخطوات (خطوة في كل سطر)<textarea name="steps" rows="5" maxlength="4000" dir="auto" placeholder="اشرب الماء&#10;راجع أهم أولوية"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ الروتين</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="articleDialog" class="dialog">
+    <form id="articleForm" class="dialog-card">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">اقرأها وراجعها لاحقاً</p><h2 id="articleDialogTitle">حفظ رابط</h2></div>
+        <button type="button" class="icon-button" data-close aria-label="إغلاق">×</button>
+      </div>
+      <input name="id" type="hidden">
+      <label>عنوان الصفحة<input name="title" required maxlength="300" dir="auto"></label>
+      <label class="spaced">رابط الصفحة<input name="url" required type="url" maxlength="2048" dir="ltr"></label>
+      <label class="spaced">وصف مختصر<textarea name="description" rows="2" maxlength="2000" dir="auto"></textarea></label>
+      <label class="spaced">مقتطف من الصفحة<textarea name="excerpt" rows="3" maxlength="5000" dir="auto" placeholder="النص المحدد عند الحفظ من إضافة Chrome يظهر هنا."></textarea></label>
+      <label class="spaced">حالتي
+        <select name="status"><option value="unread">للقراءة لاحقاً</option><option value="reading">أقرأها</option><option value="read">تمت قراءتها</option></select>
+      </label>
+      <label class="spaced markdown-field">مراجعتي وملاحظاتي (Markdown)
+        <div class="markdown-toolbar">
+          <button type="button" data-markdown-format="**نص عريض**" aria-label="نص عريض"><strong>B</strong></button>
+          <button type="button" data-markdown-format="## عنوان" aria-label="إضافة عنوان">عنوان</button>
+          <button type="button" data-markdown-format="- عنصر قائمة" aria-label="إضافة قائمة">قائمة</button>
+          <button type="button" data-markdown-format="> اقتباس" aria-label="إضافة اقتباس">اقتباس</button>
+          <button type="button" data-markdown-format="[نص الرابط](https://example.com)" aria-label="إضافة رابط">رابط</button>
+          <select data-backlink-picker aria-label="إضافة رابط لملاحظة"><option value="">ربط بملاحظة...</option></select>
+          <button id="articleImageButton" type="button">إدراج صورة</button>
+          <button id="articleReviewPreviewToggle" type="button" aria-pressed="false">معاينة</button>
+          <input id="articleImageUpload" class="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+        </div>
+        <textarea name="review" id="articleReviewInput" class="markdown-input" rows="6" maxlength="10000" dir="auto" placeholder="أضف أفكارك ومراجعتك..."></textarea>
+        <div id="articleReviewPreview" class="markdown-preview hidden"></div>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="button button-quiet" data-close>إلغاء</button>
+        <button class="button button-primary" type="submit">حفظ الرابط</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="bookmarkDialog" class="dialog">
+    <form id="bookmarkForm" class="dialog-card">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">روابطك المهمة</p><h2 id="bookmarkDialogTitle">حفظ رابط</h2></div>
+        <button type="button" class="icon-button" data-close aria-label="إغلاق">×</button>
+      </div>
+      <input name="id" type="hidden">
+      <label>اسم الرابط<input name="title" required maxlength="300" dir="auto" placeholder="مثال: لوحة تخطيط الأسبوع"></label>
+      <label class="spaced">الرابط<input name="url" required type="url" maxlength="2048" dir="ltr" placeholder="https://example.com"></label>
+      <div class="bookmark-preview-tools">
+        <button id="fetchBookmarkPreview" class="button button-quiet" type="button">جلب صورة وعنوان الصفحة</button>
+        <span id="bookmarkPreviewStatus" role="status"></span>
+      </div>
+      <input name="image_url" type="hidden">
+      <img id="bookmarkImagePreview" class="bookmark-image-preview hidden" alt="معاينة صورة الرابط">
+      <label class="spaced">ملاحظة<textarea name="note" rows="3" maxlength="2000" dir="auto" placeholder="لماذا تريد الاحتفاظ بهذا الرابط؟"></textarea></label>
+      <div class="dialog-actions">
+        <button type="button" class="button button-quiet" data-close>إلغاء</button>
+        <button class="button button-primary" type="submit">حفظ الرابط</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="bookClubDialog" class="dialog">
+    <form id="bookClubForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">مساحة قراءة مشتركة</p><h2>إنشاء نادي كتاب</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <label>اسم النادي<input name="name" required maxlength="100" dir="auto" placeholder="مثال: نادي القراءة الأسبوعي"></label>
+      <label class="spaced">وصف مختصر<textarea name="description" rows="3" maxlength="1000" dir="auto" placeholder="ما نوع الكتب أو وتيرة النقاش؟"></textarea></label>
+      <p class="field-hint">سيكون النادي خاصاً. بعد إنشائه يمكنك إنشاء رابط دعوة صالح لمدة ٣٠ يوماً وإرساله للأعضاء.</p>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">إنشاء النادي</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="chapterDialog" class="dialog">
+    <form id="chapterForm" class="dialog-card">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">ملاحظات القراءة</p><h2 id="chapterDialogTitle">إضافة فصل</h2></div>
+        <button type="button" class="icon-button" data-close aria-label="إغلاق">×</button>
+      </div>
+      <label>اسم الفصل<input name="title" required maxlength="200" placeholder="مثال: الفصل الأول"></label>
+      <label class="spaced markdown-field">الملاحظات الملتقطة من الفصل (Markdown)
+        <div class="markdown-toolbar">
+          <button type="button" data-markdown-format="**نص عريض**"><strong>B</strong></button>
+          <button type="button" data-markdown-format="## عنوان">عنوان</button>
+          <button type="button" data-markdown-format="- عنصر قائمة">قائمة</button>
+          <button type="button" data-markdown-format="> اقتباس">اقتباس</button>
+          <button id="chapterImageButton" type="button">إدراج صورة</button>
+          <input id="chapterImageUpload" class="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+        </div>
+        <textarea name="notes" id="chapterNotes" class="markdown-input" dir="auto" rows="7" maxlength="10000" placeholder="اقتباسات، أفكار، أو ملاحظات عن هذا الفصل..."></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="button button-quiet" data-close>إلغاء</button>
+        <button class="button button-primary" type="submit">حفظ الفصل</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="progressDialog" class="dialog">
+    <form id="progressForm" class="dialog-card">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">متابعة التقدم</p><h2 id="progressTitle"></h2></div>
+        <button type="button" class="icon-button" data-close aria-label="إغلاق">×</button>
+      </div>
+      <label>وصلت إلى<input name="progress" maxlength="200" required placeholder="مثال: صفحة ١٥٠"></label>
+      <label class="spaced">ملاحظة عن الجلسة<textarea name="note" rows="3" maxlength="1000" placeholder="اختياري"></textarea></label>
+      <div id="progressHistory" class="progress-history"></div>
+      <div class="dialog-actions">
+        <button type="button" class="button button-quiet" data-close>إغلاق</button>
+        <button class="button button-primary" type="submit">حفظ التقدم</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="dialog">
+    <form id="settingsForm" class="dialog-card">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">حسابك وتفضيلاتك</p><h2>الإعدادات</h2></div>
+        <button type="button" class="icon-button" data-close aria-label="إغلاق">×</button>
+      </div>
+      <label>طريقة تعديل العناصر
+        <select name="editMode">
+          <option value="inline">التعديل داخل الصفحة</option>
+          <option value="popup">نافذة منبثقة عند الضغط على تعديل</option>
+        </select>
+      </label>
+      <label class="spaced">المظهر
+        <select name="themeMode"><option value="system">حسب إعداد الجهاز</option><option value="light">فاتح</option><option value="dark">داكن</option></select>
+      </label>
+      <section class="typography-settings" aria-labelledby="typographySettingsHeading">
+        <div class="settings-section-heading"><h3 id="typographySettingsHeading">الخط والقراءة</h3><p>خصص وضوح النص وتباعده بما يناسبك.</p></div>
+        <div class="typography-settings-grid">
+          <label>حجم الخط
+            <select name="fontSizeOffset">
+              <option value="-1">أصغر</option><option value="0">افتراضي</option><option value="1">أكبر قليلاً</option><option value="2">أكبر</option>
+            </select>
+          </label>
+          <label>نوع الخط
+            <select name="fontFamily">
+              <option value="plex">IBM Plex Sans Arabic</option><option value="system">خط النظام</option><option value="serif">خط ذو تذييلات</option>
+            </select>
+          </label>
+          <label>تباعد الأسطر
+            <select name="lineSpacing">
+              <option value="compact">مضغوط</option><option value="comfortable">مريح</option><option value="relaxed">واسع</option>
+            </select>
+          </label>
+        </div>
+      </section>
+      <label class="spaced checkbox-field"><input name="notificationSoundEnabled" type="checkbox"> تشغيل صوت عند ظهور إشعار جديد</label>
+      <p class="field-hint">يصدر التطبيق نغمة قصيرة عند ظهور تنبيه جديد داخل التطبيق، ويمكنك إيقافها هنا.</p>
+      <label class="spaced">تذكير المهام والمواعيد
+        <select name="reminderMinutes"><option value="5">قبل الموعد بـ ٥ دقائق</option><option value="10">قبل الموعد بـ ١٠ دقائق</option><option value="15">قبل الموعد بـ ١٥ دقيقة</option><option value="30">قبل الموعد بـ ٣٠ دقيقة</option><option value="60">قبل الموعد بساعة</option></select>
+      </label>
+      <label class="spaced checkbox-field"><input name="notificationsEnabled" type="checkbox"> تنبيهات المتصفح للمهام والمواعيد</label>
+      <p class="field-hint">تشمل المهام المتأخرة والمستحقة ومواعيد التقويم القريبة. تعمل أثناء فتح التطبيق فقط. سيطلب المتصفح الإذن عند تفعيلها.</p>
+      <section class="markdown-settings" aria-labelledby="markdownSettingsHeading">
+        <div class="settings-section-heading"><h3 id="markdownSettingsHeading">إعدادات Markdown</h3><p>تحكم في طريقة عرض الملاحظات وأدوات التحرير لكل حساب.</p></div>
+        <label class="checkbox-field"><input name="markdownRenderingEnabled" type="checkbox"> عرض العناوين والقوائم والروابط والصور المنسقة</label>
+        <label class="checkbox-field"><input name="markdownToolbarEnabled" type="checkbox"> إظهار شريط أدوات التنسيق</label>
+        <label class="checkbox-field"><input name="markdownImagePasteEnabled" type="checkbox"> السماح بلصق الصور وسحبها إلى المحرر</label>
+      </section>
+      <section id="backupSettings" class="backup-settings hidden">
+        <div class="settings-section-heading"><h3>نسخ احتياطية كاملة</h3><p>تتضمن قاعدة البيانات والصور والملفات الصوتية لكل الحسابات.</p></div>
+        <label class="backup-toggle"><input name="dailyBackupEnabled" type="checkbox"> إنشاء نسخة احتياطية يومية</label>
+        <p class="field-hint">تُحفظ كأرشيف ZIP محلياً في data/backups، مع الاحتفاظ بآخر ٧ نسخ كاملة. يعمل الجدول عند تشغيل التطبيق.</p>
+        <section class="s3-settings" aria-labelledby="s3SettingsHeading">
+          <div class="settings-section-heading"><h3 id="s3SettingsHeading">نسخة سحابية على AWS S3</h3><p>ارفع نسخاً من الصور والصوت والنسخ الاحتياطية إلى حاويتك الخاصة.</p></div>
+          <label class="spaced">اسم حاوية S3<input name="s3Bucket" dir="ltr" maxlength="63" autocomplete="off" placeholder="my-private-bucket"></label>
+          <div class="s3-settings-grid">
+            <label>منطقة AWS<input name="s3Region" dir="ltr" maxlength="64" value="us-east-1" placeholder="us-east-1"></label>
+            <label>بادئة المسار<input name="s3Prefix" dir="ltr" maxlength="200" value="personal-memo" placeholder="personal-memo"></label>
+          </div>
+          <p class="field-hint">تُحفظ الملفات محلياً وتُرفع نسخة إلى S3 بعد التفعيل. استخدم بيانات اعتماد AWS على الخادم عبر متغيرات البيئة أو IAM Role؛ لا تُدخل المفاتيح السرية هنا. يحتاج الدور إلى صلاحيات s3:ListBucket وs3:PutObject وs3:DeleteObject.</p>
+          <button id="testS3Connection" class="button button-quiet" type="button">اختبار الاتصال والصلاحيات</button>
+          <p id="s3Status" class="settings-message" role="status"></p>
+          <label class="backup-toggle"><input name="s3Enabled" type="checkbox"> رفع الملفات الجديدة والنسخ الاحتياطية إلى S3</label>
+        </section>
+        <button id="backupNow" class="button button-quiet" type="button">إنشاء نسخة كاملة الآن</button>
+        <div id="backupList" class="backup-list"></div>
+        <div class="backup-restore">
+          <label for="backupUpload">استعادة نسخة كاملة أو ملف SQLite قديم</label>
+          <input id="backupUpload" type="file" accept=".zip,.sqlite,.db,application/zip,application/vnd.sqlite3,application/x-sqlite3">
+          <button id="restoreBackup" class="button button-quiet" type="button">استعادة النسخة المحددة</button>
+          <p class="field-hint">استعادة ZIP تستبدل قاعدة البيانات والصور والصوت بعد إنشاء أرشيف أمان. ملفات SQLite القديمة تستعيد قاعدة البيانات فقط. الحد ١ غيغابايت.</p>
+        </div>
+      </section>
+      <p id="settingsMessage" class="settings-message" role="status"></p>
+      <div class="dialog-actions">
+        <button type="button" class="button button-quiet" data-close>إلغاء</button>
+        <button class="button button-primary" type="submit">حفظ الإعدادات</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dailyCompletionDialog" class="dialog celebration-dialog">
+    <div class="dialog-card celebration-card">
+      <button type="button" class="icon-button celebration-close" data-close aria-label="إغلاق">×</button>
+      <div class="celebration-icon" aria-hidden="true">🏆</div>
+      <p class="eyebrow">إنجاز اليوم</p>
+      <h2>أحسنت! أنهيت مهام اليوم 🎉</h2>
+      <p>خطوة بعد خطوة، أنجزت ما خططت له. خذ لحظة للاحتفال بهذا التقدم.</p>
+      <button id="celebrationDone" class="button button-primary" type="button">رائع!</button>
+    </div>
+  </dialog>
+
+  <dialog id="galleryViewer" class="gallery-viewer">
+    <button type="button" class="gallery-viewer-close" aria-label="إغلاق الصورة">×</button>
+    <button type="button" class="gallery-viewer-step gallery-viewer-previous" aria-label="الصورة السابقة">‹</button>
+    <figure><img id="galleryViewerImage" alt=""><figcaption><strong id="galleryViewerCaption"></strong><span id="galleryViewerMeta"></span></figcaption></figure>
+    <button type="button" class="gallery-viewer-step gallery-viewer-next" aria-label="الصورة التالية">›</button>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"><span id="toastMessage"></span><button id="toastUndo" class="toast-undo hidden" type="button">تراجع</button></div>
+  <footer>مكتبة كل حساب وصوره وملفاته الصوتية محفوظة محلياً على هذا الجهاز. البحث عن البيانات يستخدم الإنترنت فقط (Open Library أو IMDb أو Wikipedia).</footer>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
