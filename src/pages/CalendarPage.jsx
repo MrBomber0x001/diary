@@ -52,12 +52,12 @@ function localDateTime(value) {
   return `${value}T09:00`;
 }
 
-export default function CalendarPage({ language, onUnauthorized }) {
+export default function CalendarPage({ initialDate, language, onUnauthorized }) {
   const [month, setMonth] = useState(() => {
-    const today = new Date(`${todayDate()}T12:00:00`);
+    const today = new Date(`${initialDate || todayDate()}T12:00:00`);
     return new Date(today.getFullYear(), today.getMonth(), 1, 12);
   });
-  const [selectedDate, setSelectedDate] = useState(todayDate());
+  const [selectedDate, setSelectedDate] = useState(() => initialDate || todayDate());
   const [events, setEvents] = useState([]);
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState('');

@@ -5,13 +5,13 @@ import CollectionPage from './CollectionPage.jsx';
 import Editor from '../components/Editor.jsx';
 import { collections } from './collections.js';
 
-export default function NotesPage({ language, onUnauthorized, section }) {
+export default function NotesPage({ language, onUnauthorized, section, date }) {
   if (section !== 'daily') return <CollectionPage config={collections[section === 'bookmarks' ? 'bookmarks' : section === 'snippets' ? 'snippets' : 'articles']} language={language} onUnauthorized={onUnauthorized} />;
-  return <DailyNotePage language={language} onUnauthorized={onUnauthorized} />;
+  return <DailyNotePage initialDate={date} language={language} onUnauthorized={onUnauthorized} />;
 }
 
-function DailyNotePage({ language, onUnauthorized }) {
-  const [date, setDate] = useState(todayDate());
+function DailyNotePage({ initialDate, language, onUnauthorized }) {
+  const [date, setDate] = useState(() => initialDate || todayDate());
   const [note, setNote] = useState({ title: '', body: '' });
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');

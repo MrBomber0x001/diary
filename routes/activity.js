@@ -408,52 +408,52 @@ function createActivityRouter({ db, now, text, localToday, localTime, validDate 
     const entries = [
       ...db.prepare(`SELECT id,
           CASE WHEN lower(tags) LIKE '%idea%' OR lower(tags) LIKE '%thought%' OR tags LIKE '%فكر%' THEN 'thought' ELSE 'writing' END AS type,
-          title,substr(created_at,1,10) AS date,notes AS detail
+        title,substr(created_at,1,10) AS date,notes AS detail,'/item/' || id AS href
         FROM items WHERE user_id=? AND deleted_at IS NULL AND kind='memo' AND substr(created_at,1,10) BETWEEN ? AND ?`)
         .all(userId, start, end),
       ...db.prepare(`SELECT id,'writing' AS type,COALESCE(NULLIF(title,''),'مذكرة اليوم') AS title,
-          note_date AS date,substr(body,1,1000) AS detail
+        note_date AS date,substr(body,1,1000) AS detail,'/?view=daily-note&date=' || note_date AS href
         FROM daily_notes WHERE user_id=? AND note_date BETWEEN ? AND ? AND body<>''`)
         .all(userId, start, end),
-      ...calendarEntries,
+      ...calendarEntries.map(entry => ({ ...entry, href: `/?view=calendar&date=${entry.date}` })),
       ...db.prepare(`SELECT id,'reading' AS type,title,substr(updated_at,1,10) AS date,
-          CASE WHEN creator<>'' THEN creator ELSE progress END AS detail
+        CASE WHEN creator<>'' THEN creator ELSE progress END AS detail,'/item/' || id AS href
         FROM items WHERE user_id=? AND deleted_at IS NULL AND kind='book' AND status='completed'
         AND substr(updated_at,1,10) BETWEEN ? AND ?`)
         .all(userId, start, end),
       ...db.prepare(`SELECT p.id,'reading' AS type,i.title,substr(p.logged_at,1,10) AS date,
-          trim(p.progress || CASE WHEN p.note<>'' THEN ' · ' || p.note ELSE '' END) AS detail
+        trim(p.progress || CASE WHEN p.note<>'' THEN ' · ' || p.note ELSE '' END) AS detail,'/item/' || i.id AS href
         FROM progress_events p JOIN items i ON i.id=p.item_id
         WHERE i.user_id=? AND i.deleted_at IS NULL AND substr(p.logged_at,1,10) BETWEEN ? AND ?`)
         .all(userId, start, end),
       ...db.prepare(`SELECT id,'viewing' AS type,title,substr(updated_at,1,10) AS date,
-          CASE WHEN creator<>'' THEN creator ELSE progress END AS detail
+        CASE WHEN creator<>'' THEN creator ELSE progress END AS detail,'/item/' || id AS href
         FROM items WHERE user_id=? AND deleted_at IS NULL AND kind IN ('movie','game') AND status='completed'
         AND substr(updated_at,1,10) BETWEEN ? AND ?`)
         .all(userId, start, end),
-      ...db.prepare(`SELECT id,'task' AS type,title,substr(updated_at,1,10) AS date,notes AS detail
+      ...db.prepare(`SELECT id,'task' AS type,title,substr(updated_at,1,10) AS date,notes AS detail,'/?view=tasks' AS href
         FROM todos WHERE user_id=? AND deleted_at IS NULL AND completed=1 AND substr(updated_at,1,10) BETWEEN ? AND ?`)
         .all(userId, start, end),
-      ...db.prepare(`SELECT l.id,'habit' AS type,h.title,l.habit_date AS date,h.notes AS detail
+      ...db.prepare(`SELECT l.id,'habit' AS type,h.title,l.habit_date AS date,h.notes AS detail,'/?view=habits' AS href
         FROM habit_logs l JOIN habits h ON h.id=l.habit_id
         WHERE l.user_id=? AND h.archived=0 AND l.habit_date BETWEEN ? AND ?`)
         .all(userId, start, end),
-      ...db.prepare(`SELECT l.id,'routine' AS type,r.title,l.routine_date AS date,r.description AS detail
+      ...db.prepare(`SELECT l.id,'routine' AS type,r.title,l.routine_date AS date,r.description AS detail,'/?view=habits' AS href
         FROM routine_logs l JOIN routines r ON r.id=l.routine_id
         WHERE l.user_id=? AND r.archived=0 AND l.routine_date BETWEEN ? AND ?`)
         .all(userId, start, end),
-      ...db.prepare(`SELECT id,'reading' AS type,title,substr(updated_at,1,10) AS date,description AS detail
+      ...db.prepare(`SELECT id,'reading' AS type,title,substr(updated_at,1,10) AS date,description AS detail,'/?view=notes' AS href
         FROM saved_articles WHERE user_id=? AND deleted_at IS NULL AND status='read'
         AND substr(updated_at,1,10) BETWEEN ? AND ?`)
         .all(userId, start, end),
-      ...db.prepare(`SELECT c.id,'reading' AS type,c.title,substr(c.updated_at,1,10) AS date,i.title AS detail
+      ...db.prepare(`SELECT c.id,'reading' AS type,c.title,substr(c.updated_at,1,10) AS date,i.title AS detail,'/item/' || i.id AS href
         FROM chapters c JOIN items i ON i.id=c.item_id
         WHERE i.user_id=? AND i.deleted_at IS NULL AND c.notes<>''
           AND substr(c.updated_at,1,10) BETWEEN ? AND ?`)
         .all(userId, start, end),
     ].map(entry => ({ ...entry, detail: entry.detail || '' }));
     entries.sort((left, right) => right.date.localeCompare(left.date) || right.id - left.id);
-    res.json({ start, end, entries: entries.slice(0, 300) });
+    res.json({ start, end, entries });
   });
 
   router.get('/weekly-review', (req, res) => {

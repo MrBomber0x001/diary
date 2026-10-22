@@ -26,7 +26,7 @@ function PersistentAudioPlayer({ item, onStop, language }) {
 }
 
 const navGroups = [
-  [['home', 'today', '⌂'], ['library', 'library', '▤'], ['tasks', 'tasks', '✓'], ['calendar', 'calendar', '▦']],
+  [['home', 'today', '⌂'], ['library', 'library', '▤'], ['tasks', 'tasks', '✓'], ['calendar', 'calendar', '▦'], ['timeline', 'timeline', '◷']],
   [['planning', 'planning', '◎'], ['habits', 'habits', '✳'], ['notes', 'notes', '✎'], ['learning', 'learning', '↗']],
   [['finance', 'finance', '$'], ['clubs', 'clubs', '◉'], ['interviews', 'interviews', '◷'], ['gallery', 'gallery', '▧']],
   [['focus', 'focus', '◌'], ['quran', 'quran', '☾'], ['settings', 'settings', '⚙']],

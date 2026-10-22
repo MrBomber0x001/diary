@@ -162,6 +162,27 @@ function readArchiveEntry(filePath, targetName) {
   });
 }
 
+test('question imports parse quoted CSV and JSON metadata safely', async () => {
+  const { parseQuestionImport } = await import('../src/question-import.mjs');
+  const csv = '\uFEFFquestion,answer,answer_notes,tags,difficulty\r\n"What is ""idempotency""?\nExplain it","Same result, repeated.","Use an example.","api, design",advanced\r\n';
+  assert.deepEqual(parseQuestionImport('csv', csv), [{
+    question: 'What is "idempotency"?\nExplain it',
+    answer: 'Same result, repeated.',
+    answer_notes: 'Use an example.',
+    tags: ['api', 'design'],
+    difficulty: 'advanced',
+  }]);
+  assert.deepEqual(parseQuestionImport('json', '[{"question":"Explain caching","answer":"Store reusable results","tags":["backend"]}]'), [{
+    question: 'Explain caching',
+    answer: 'Store reusable results',
+    answer_notes: '',
+    tags: ['backend'],
+    difficulty: 'intermediate',
+  }]);
+  assert.throws(() => parseQuestionImport('csv', 'question,answer\n"What is this?,No answer'), /unclosed quoted field/);
+  assert.throws(() => parseQuestionImport('json', '[{"question":"Q","answer":"A","difficulty":"expert"}]'), /difficulty must be/);
+});
+
 test('accounts, library search, recurring tasks, undo, and full media backup restore', async () => {
   ownerCookie = await createAccount('owner_test', 'test-password-1234');
 
@@ -438,8 +459,13 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   const mockCard = await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/cards`, 'POST', {
     question: 'Design a rate limiter.',
     answer: 'Use a token bucket backed by shared storage for distributed instances.',
+    answer_notes: 'Cover burst handling, atomic updates, and distributed consistency.',
+    tags: 'system design, distributed systems',
+    difficulty: 'advanced',
   }, ownerCookie);
   assert.equal(mockCard.response.status, 201);
+  assert.deepEqual(mockCard.result.tags, ['system design', 'distributed systems']);
+  assert.equal(mockCard.result.difficulty, 'advanced');
   assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/cards/${mockCard.result.id}`, 'PUT', {
     ...mockCard.result,
     answer: 'Use a token bucket with an atomic shared backing store.',
@@ -450,6 +476,45 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   const mockCardPage = await request(`/api/interviews/topics/${mockTopic.result.id}/cards?page=1&pageSize=1`, { cookie: ownerCookie });
   assert.equal(mockCardPage.result.total, 1);
   assert.equal(mockCardPage.result.cards[0].answer, 'Use a token bucket with an atomic shared backing store.');
+  assert.equal(mockCardPage.result.cards[0].answer_notes, 'Cover burst handling, atomic updates, and distributed consistency.');
+  assert.deepEqual(mockCardPage.result.cards[0].tags, ['system design', 'distributed systems']);
+  const filteredCards = await request(`/api/interviews/topics/${mockTopic.result.id}/cards?tag=distributed%20systems&difficulty=advanced`, { cookie: ownerCookie });
+  assert.equal(filteredCards.result.total, 1);
+  const emptyFilteredCards = await request(`/api/interviews/topics/${mockTopic.result.id}/cards?tag=unknown`, { cookie: ownerCookie });
+  assert.equal(emptyFilteredCards.result.total, 0);
+  const mockPractice = await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/practice-sessions`, 'POST', {
+    mode: 'unpracticed',
+    count: '5',
+    time_limit_seconds: 60,
+    difficulty: 'advanced',
+    tag: 'distributed systems',
+  }, ownerCookie);
+  assert.equal(mockPractice.response.status, 201);
+  assert.equal(mockPractice.result.cards.length, 1);
+  assert.equal(mockPractice.result.cards[0].answer_notes, 'Cover burst handling, atomic updates, and distributed consistency.');
+  assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/practice-sessions`, 'POST', {
+    mode: 'random', count: '5', time_limit_seconds: 45,
+  }, ownerCookie)).response.status, 400);
+  assert.equal((await request(`/api/interviews/topics/${mockTopic.result.id}/practice-sessions`, {
+    cookie: learningGuestCookie,
+  })).response.status, 404);
+  const mockPracticeResponse = await jsonRequest(`/api/interviews/practice-sessions/${mockPractice.result.id}/responses/${mockCard.result.id}`, 'PUT', {
+    rating: 'needs_work',
+    response: 'Need to explain shared storage consistency.',
+    elapsed_seconds: 42,
+  }, ownerCookie);
+  assert.equal(mockPracticeResponse.response.status, 200);
+  const completedMockPractice = await jsonRequest(`/api/interviews/practice-sessions/${mockPractice.result.id}/complete`, 'POST', {
+    elapsed_seconds: 58,
+  }, ownerCookie);
+  assert.equal(completedMockPractice.result.needs_work, 1);
+  assert.equal(completedMockPractice.result.answered, 1);
+  const needsWorkCards = await request(`/api/interviews/topics/${mockTopic.result.id}/cards?mode=needs_work`, { cookie: ownerCookie });
+  assert.equal(needsWorkCards.result.total, 1);
+  assert.equal(needsWorkCards.result.cards[0].last_rating, 'needs_work');
+  const practicedCards = await request(`/api/interviews/topics/${mockTopic.result.id}/cards?mode=unpracticed`, { cookie: ownerCookie });
+  assert.equal(practicedCards.result.total, 0);
+  assert.equal((await request(`/api/interviews/topics/${mockTopic.result.id}/practice-sessions`, { cookie: ownerCookie })).result[0].needs_work, 1);
   const mockQuiz = await request(`/api/interviews/topics/${mockTopic.result.id}/quiz?count=10`, { cookie: ownerCookie });
   assert.equal(mockQuiz.result.cards.length, 1);
   assert.equal((await request(`/api/interviews/topics/${mockTopic.result.id}/quiz?count=all`, { cookie: learningGuestCookie })).response.status, 404);
@@ -489,6 +554,34 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   })).response.status, 404);
   db.prepare('DELETE FROM interview_cards WHERE topic_id=? AND question LIKE ?')
     .run(mockTopic.result.id, 'Scale test question %');
+  const importTopic = await jsonRequest('/api/interviews/topics', 'POST', { title: 'Import regression' }, ownerCookie);
+  const existingImportCard = await jsonRequest(`/api/interviews/topics/${importTopic.result.id}/cards`, 'POST', {
+    question: 'Existing question',
+    answer: 'Existing answer',
+  }, ownerCookie);
+  assert.equal(existingImportCard.response.status, 201);
+  assert.equal((await jsonRequest(`/api/interviews/topics/${importTopic.result.id}/cards/import`, 'POST', {
+    cards: [{ question: 'Private question', answer: 'Answer' }],
+  }, learningGuestCookie)).response.status, 404);
+  const importedCards = await jsonRequest(`/api/interviews/topics/${importTopic.result.id}/cards/import`, 'POST', {
+    cards: [
+      { question: ' Existing   question ', answer: 'Duplicate answer' },
+      { question: 'Imported question', answer: 'Imported answer', difficulty: 'beginner', tags: ['backend', 'api'] },
+      { question: 'Imported question', answer: 'Duplicate in this batch' },
+      { question: 'Second imported question', answer: 'Another answer', answer_notes: 'Keep it concise.' },
+    ],
+  }, ownerCookie);
+  assert.equal(importedCards.response.status, 201);
+  assert.deepEqual(importedCards.result, { imported: 2, duplicates: 2 });
+  assert.equal((await request(`/api/interviews/topics/${importTopic.result.id}/cards`, { cookie: ownerCookie })).result.total, 3);
+  assert.equal((await jsonRequest(`/api/interviews/topics/${importTopic.result.id}/cards/import`, 'POST', {
+    cards: [
+      { question: 'Would be valid', answer: 'Would be saved only if batch validation were partial.' },
+      { question: '', answer: 'Invalid question.' },
+    ],
+  }, ownerCookie)).response.status, 400);
+  assert.equal((await request(`/api/interviews/topics/${importTopic.result.id}/cards`, { cookie: ownerCookie })).result.total, 3);
+  assert.equal((await jsonRequest(`/api/interviews/topics/${importTopic.result.id}`, 'DELETE', {}, ownerCookie)).response.status, 200);
   assert.equal((await jsonRequest('/api/interviews', 'POST', {
     company: 'Bad status',
     role: 'Engineer',
@@ -1148,7 +1241,27 @@ test('daily notes, backlinks, pins, and categorized gallery images stay private'
   assert.equal((await request(`/api/backlinks/item/${memo.result.id}`, { cookie: noteOwner }))
     .result.find(link => link.type === 'article').url, 'https://example.com/article');
   const timeline = await request('/api/timeline?start=2026-10-20&end=2026-10-21', { cookie: noteOwner });
-  assert.ok(timeline.result.entries.some(entry => entry.title === 'A quiet day' && entry.type === 'writing'));
+  assert.ok(timeline.result.entries.some(entry => entry.title === 'A quiet day' && entry.type === 'writing'
+    && entry.href === '/?view=daily-note&date=2026-10-20'));
+  const memoTimeline = await request(`/api/timeline?start=${memo.result.created_at.slice(0, 10)}&end=${memo.result.created_at.slice(0, 10)}`, {
+    cookie: noteOwner,
+  });
+  assert.ok(memoTimeline.result.entries.some(entry => entry.title === 'Backlink target memo'
+    && entry.href === `/item/${memo.result.id}`));
+  const timelineUserId = db.prepare("SELECT id FROM users WHERE username='note_writer'").get().id;
+  const insertTimelineEvent = db.prepare(`INSERT INTO calendar_events(
+    user_id,title,description,starts_at,ends_at,all_day,recurrence,created_at,updated_at
+  ) VALUES (?,?,?,?,?,0,'none',?,?)`);
+  const timelineEventDate = '2026-10-20';
+  for (let index = 0; index < 301; index += 1) {
+    const timestamp = new Date().toISOString();
+    insertTimelineEvent.run(timelineUserId, `Timeline event ${index}`, '', `${timelineEventDate}T10:00`, null, timestamp, timestamp);
+  }
+  const busyTimeline = await request(`/api/timeline?start=${timelineEventDate}&end=${timelineEventDate}`, { cookie: noteOwner });
+  assert.equal(busyTimeline.response.status, 200);
+  assert.ok(busyTimeline.result.entries.length > 300);
+  assert.equal(busyTimeline.result.entries.find(entry => entry.type === 'event').href,
+    `/?view=calendar&date=${timelineEventDate}`);
   assert.ok((await request('/api/note-index', { cookie: noteOwner })).result.some(note => note.title === 'Backlink target memo'));
   assert.equal((await request('/api/daily-notes?date=not-a-date', { cookie: noteOwner })).response.status, 400);
   assert.equal((await request(`/api/backlinks/item/${memo.result.id}`, { cookie: noteGuest })).response.status, 404);

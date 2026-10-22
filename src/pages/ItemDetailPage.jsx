@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import Editor from '../components/Editor.jsx';
 import ActionIcon from '../components/ActionIcon.jsx';
-import EditorDialog from '../components/EditorDialog.jsx';
 import MarkdownContent from '../components/MarkdownContent.jsx';
 import { messages } from '../i18n.js';
 import { navigate } from '../navigation.jsx';
@@ -89,9 +88,10 @@ export default function ItemDetailPage({ id, language, onUnauthorized }) {
         <div><h1>{item.title}</h1><p>{[item.creator, item.kind, item.status].filter(Boolean).join(' · ')}</p></div>
         {item.cover_image && <img className="detail-cover" src={item.cover_image} alt="" />}
       </header>
-      {mode === 'edit' && <EditorDialog title={item.title} language={language} onClose={() => setMode('')}>
+      {mode === 'edit' && <section className="item-inline-editor">
+        <header className="collection-inline-heading"><h2>{language === 'ar' ? 'تحرير العنصر' : 'Edit item'}</h2></header>
         <Editor fields={collections.library.fields} value={item} language={language} onSubmit={saveItem} onCancel={() => setMode('')} onUnauthorized={onUnauthorized} quickCapture />
-      </EditorDialog>}
+      </section>}
       {mode === 'progress' && <Editor fields={progressFields} language={language} onSubmit={addProgress} onCancel={() => setMode('')} onUnauthorized={onUnauthorized} />}
       {mode === 'chapter' && <Editor fields={chapterFields} language={language} onSubmit={addChapter} onCancel={() => setMode('')} onUnauthorized={onUnauthorized} />}
       <div className="record-actions">

@@ -580,10 +580,44 @@ db.exec(`
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
+    answer_notes TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '',
+    difficulty TEXT NOT NULL DEFAULT 'intermediate' CHECK (difficulty IN ('beginner','intermediate','advanced')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS interview_practice_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id INTEGER NOT NULL REFERENCES interview_topics(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL CHECK (mode IN ('random','unpracticed','needs_work')),
+    question_count INTEGER NOT NULL CHECK (question_count > 0),
+    time_limit_seconds INTEGER NOT NULL DEFAULT 0 CHECK (time_limit_seconds >= 0),
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    elapsed_seconds INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0)
+  );
+  CREATE TABLE IF NOT EXISTS interview_practice_responses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES interview_practice_sessions(id) ON DELETE CASCADE,
+    card_id INTEGER NOT NULL REFERENCES interview_cards(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rating TEXT NOT NULL CHECK (rating IN ('strong','needs_work','skip')),
+    response TEXT NOT NULL DEFAULT '',
+    elapsed_seconds INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id,card_id)
+  );
 `);
+for (const [column, definition] of [
+  ['answer_notes', "TEXT NOT NULL DEFAULT ''"],
+  ['tags', "TEXT NOT NULL DEFAULT ''"],
+  ['difficulty', "TEXT NOT NULL DEFAULT 'intermediate'"],
+]) {
+  if (!db.prepare('PRAGMA table_info(interview_cards)').all().some(item => item.name === column)) {
+    db.exec(`ALTER TABLE interview_cards ADD COLUMN "${column}" ${definition}`);
+  }
+}
 if (!db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column.name === 'todo_id')) {
   db.exec('ALTER TABLE focus_sessions ADD COLUMN todo_id INTEGER REFERENCES todos(id) ON DELETE SET NULL');
 }
@@ -620,6 +654,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_interview_rounds_application ON interview_rounds(application_id,occurred_on DESC,id DESC);
   CREATE INDEX IF NOT EXISTS idx_interview_topics_user_title ON interview_topics(user_id,title);
   CREATE INDEX IF NOT EXISTS idx_interview_cards_topic ON interview_cards(topic_id,user_id,id);
+  CREATE INDEX IF NOT EXISTS idx_interview_practice_topic ON interview_practice_sessions(topic_id,user_id,started_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_interview_practice_card ON interview_practice_responses(card_id,user_id,created_at DESC,id DESC);
 `);
 db.prepare("INSERT OR IGNORE INTO application_settings(key,value) VALUES ('daily_backup_enabled','1')").run();
 for (const [key, value] of [
@@ -1089,6 +1125,8 @@ const restoreTables = [
   'interview_rounds',
   'interview_topics',
   'interview_cards',
+  'interview_practice_sessions',
+  'interview_practice_responses',
   'book_clubs',
   'book_club_members',
   'book_club_invites',
@@ -1143,7 +1181,8 @@ function restoreDatabaseFrom(filePath, sourceTables) {
       const deleteOrder = ['sessions', 'learning_files', 'learning_notes', 'learning_topics',
         'finance_transactions', 'finance_budgets', 'finance_subscriptions',
         'progress_events', 'chapters', 'audio_attachments', 'image_attachments',
-        'habit_logs', 'routine_logs', 'focus_sessions', 'interview_cards', 'interview_rounds', 'interview_topics', 'interview_applications', 'todos', 'calendar_events', 'saved_articles', 'routines', 'habits',
+        'habit_logs', 'routine_logs', 'focus_sessions', 'interview_practice_responses', 'interview_practice_sessions',
+        'interview_cards', 'interview_rounds', 'interview_topics', 'interview_applications', 'todos', 'calendar_events', 'saved_articles', 'routines', 'habits',
         'book_club_message_attachments', 'book_club_message_links', 'book_club_notifications',
         'book_club_meetings', 'book_club_messages', 'book_club_progress', 'book_club_books',
         'book_club_invites', 'book_club_members', 'book_clubs', 'items', 'projects', 'goals', 'life_areas',

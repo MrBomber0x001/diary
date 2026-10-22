@@ -19,6 +19,7 @@ import GalleryPage from './pages/GalleryPage.jsx';
 import QuranPrayerPage from './pages/QuranPrayerPage.jsx';
 import InterviewPage from './pages/InterviewPage.jsx';
 import BookClubsPage from './pages/BookClubsPage.jsx';
+import TimelinePage from './pages/TimelinePage.jsx';
 import { collections } from './pages/collections.js';
 
 function resolveRoute(location) {
@@ -26,7 +27,7 @@ function resolveRoute(location) {
   const item = url.pathname.match(/^\/item\/(\d+)\/?$/);
   if (item) return { page: 'item', id: item[1] };
   if (url.searchParams.has('clubInvite')) return { page: 'clubs' };
-  return { page: url.searchParams.get('view') || 'today' };
+  return { page: url.searchParams.get('view') || 'today', date: url.searchParams.get('date') || '' };
 }
 
 export default function App() {
@@ -110,13 +111,14 @@ export default function App() {
   else if (route.page === 'today') content = <TodayPage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'library') content = <CollectionPage config={collections.library} language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'tasks') content = <CollectionPage config={collections.tasks} language={language} onUnauthorized={unauthorized} />;
-  else if (route.page === 'calendar') content = <CalendarPage language={language} onUnauthorized={unauthorized} />;
+  else if (route.page === 'calendar') content = <CalendarPage initialDate={route.date} language={language} onUnauthorized={unauthorized} />;
+  else if (route.page === 'timeline') content = <TimelinePage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'habits') content = <><CollectionPage config={collections.habits} language={language} onUnauthorized={unauthorized} /><CollectionPage config={collections.routines} language={language} onUnauthorized={unauthorized} /></>;
   else if (route.page === 'planning') content = <PlanningPage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'notes') content = <NotesPage section="articles" language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'bookmarks') content = <NotesPage section="bookmarks" language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'snippets') content = <NotesPage section="snippets" language={language} onUnauthorized={unauthorized} />;
-  else if (route.page === 'daily-note') content = <NotesPage section="daily" language={language} onUnauthorized={unauthorized} />;
+  else if (route.page === 'daily-note') content = <NotesPage section="daily" date={route.date} language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'learning') content = <LearningPage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'finance') content = <FinancePage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'clubs') content = <BookClubsPage language={language} onUnauthorized={unauthorized} />;

@@ -22,6 +22,9 @@ export default function CollectionPage({ config, language, onUnauthorized, query
   const [editing, setEditing] = useState(null);
   const [filter, setFilter] = useState('');
   const [taskFilter, setTaskFilter] = useState('open');
+  const [taskLayout, setTaskLayout] = useState(() => localStorage.getItem('personal-memo-task-layout') === 'board' ? 'board' : 'list');
+  const [draggingTaskId, setDraggingTaskId] = useState(null);
+  const [dragOverTaskColumn, setDragOverTaskColumn] = useState('');
   const [libraryKind, setLibraryKind] = useState('all');
   const [libraryStatus, setLibraryStatus] = useState('all');
   const [libraryLayout, setLibraryLayout] = useState(() => localStorage.getItem('personal-memo-library-layout') === 'list' ? 'list' : 'grid');
@@ -120,6 +123,11 @@ export default function CollectionPage({ config, language, onUnauthorized, query
     ? filteredRows.slice((currentApplicationPage - 1) * 9, currentApplicationPage * 9)
     : filteredRows;
 
+  function chooseTaskLayout(layout) {
+    setTaskLayout(layout);
+    localStorage.setItem('personal-memo-task-layout', layout);
+  }
+
   async function save(value) {
     const body = config.prepare ? config.prepare(value) : value;
     try {
@@ -182,17 +190,22 @@ export default function CollectionPage({ config, language, onUnauthorized, query
     }
   }
 
-  async function toggleTask(row) {
+  async function setTaskCompleted(row, completed) {
+    if (Boolean(row.completed) === completed) return;
     try {
       const result = await api(`/todos/${row.id}`, {
         method: 'PUT',
-        body: config.prepare({ ...row, completed: !row.completed }),
+        body: config.prepare({ ...row, completed }),
       });
       setRows(current => current.map(item => item.id === row.id ? { ...item, ...result } : item));
     } catch (failure) {
       if (failure.status === 401) onUnauthorized();
       else setError(failure.message);
     }
+  }
+
+  async function toggleTask(row) {
+    await setTaskCompleted(row, !Boolean(row.completed));
   }
 
   async function addQuickTask(event) {
@@ -214,7 +227,14 @@ export default function CollectionPage({ config, language, onUnauthorized, query
     const currentTime = new Date().toTimeString().slice(0, 5);
     const overdue = !row.completed && row.due_date && (row.due_date < today
       || (row.due_date === today && row.due_time && row.due_time < currentTime));
-    return <article className={`record-card task-card ${row.completed ? 'task-completed' : ''}`} key={row.id}>
+    return <article className={`record-card task-card ${row.completed ? 'task-completed' : ''} ${draggingTaskId === row.id ? 'task-card-dragging' : ''}`}
+      key={row.id} draggable={taskLayout === 'board'}
+      onDragStart={event => {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', String(row.id));
+        setDraggingTaskId(row.id);
+      }}
+      onDragEnd={() => { setDraggingTaskId(null); setDragOverTaskColumn(''); }}>
       <label className="task-check" aria-label={`${language === 'ar' ? 'تحديد اكتمال' : 'Mark complete'}: ${row.title}`}>
         <input type="checkbox" checked={Boolean(row.completed)} onChange={() => toggleTask(row)} />
         <span className="task-checkmark" aria-hidden="true">{row.completed ? '✓' : ''}</span>
@@ -301,6 +321,15 @@ export default function CollectionPage({ config, language, onUnauthorized, query
   }
 
   function renderLibraryItem(row) {
+    if (editing?.id === row.id) {
+      return <article className="library-card library-card-editing" key={row.id}>
+        <header className="collection-inline-heading">
+          <h3>{row.title}</h3>
+          <span>{language === 'ar' ? 'تحرير مباشر' : 'Editing in place'}</span>
+        </header>
+        <Editor fields={config.fields} value={row} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} quickCapture />
+      </article>;
+    }
     const kindLabels = language === 'ar'
       ? { book: 'كتاب', movie: 'فيلم', game: 'لعبة', memo: 'مذكرة' }
       : { book: 'Book', movie: 'Movie', game: 'Game', memo: 'Note' };
@@ -335,6 +364,15 @@ export default function CollectionPage({ config, language, onUnauthorized, query
   }
 
   function renderReadingItem(row) {
+    if (editing?.id === row.id) {
+      return <article className="reading-card reading-card-editing" key={row.id}>
+        <header className="collection-inline-heading">
+          <h3>{row.title}</h3>
+          <span>{language === 'ar' ? 'تحرير مباشر' : 'Editing in place'}</span>
+        </header>
+        <Editor fields={config.fields} value={row} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} />
+      </article>;
+    }
     const statuses = language === 'ar'
       ? { unread: 'لم يُقرأ', reading: 'قيد القراءة', read: 'مكتمل', archived: 'مؤرشف' }
       : { unread: 'Unread', reading: 'Reading', read: 'Read', archived: 'Archived' };
@@ -411,15 +449,21 @@ export default function CollectionPage({ config, language, onUnauthorized, query
         <input id="quick-task-title" dir="auto" value={quickTask} onChange={event => setQuickTask(event.target.value)} placeholder={language === 'ar' ? 'اكتب مهمة واضغط Enter…' : 'Add a task and press Enter…'} />
         <button className="button button-primary" type="submit" disabled={!quickTask.trim()}>{language === 'ar' ? 'إضافة' : 'Add'}</button>
       </form>}
-      {editing !== null && (config.viewType === 'library' || config.viewType === 'snippets'
-        ? <EditorDialog
+      {editing !== null && (config.viewType === 'library' || config.viewType === 'reading') && !editing.id && <section className="collection-inline-editor">
+        <header className="collection-inline-heading">
+          <h2>{editing.title || (language === 'ar' ? `إضافة ${config.singular} جديد` : `New ${config.singular}`)}</h2>
+          <span>{language === 'ar' ? 'تحرير مباشر دون نافذة منبثقة' : 'Edit without leaving the page'}</span>
+        </header>
+        <Editor fields={config.fields} value={editing} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} quickCapture={config.viewType === 'library'} />
+      </section>}
+      {editing !== null && config.viewType === 'snippets' && <EditorDialog
             title={editing.title || (config.viewType === 'library' ? (language === 'ar' ? 'عنصر جديد' : 'New library item') : (language === 'ar' ? 'مقطع جديد' : 'New snippet'))}
             language={language}
             onClose={() => setEditing(null)}
           >
-            <Editor fields={config.fields} value={editing} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} quickCapture={config.viewType === 'library'} />
-          </EditorDialog>
-        : <Editor fields={config.fields} value={editing} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} />)}
+            <Editor fields={config.fields} value={editing} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} />
+          </EditorDialog>}
+      {editing !== null && config.viewType !== 'library' && config.viewType !== 'reading' && config.viewType !== 'snippets' && <Editor fields={config.fields} value={editing} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} />}
       {config.viewType === 'library' && <div className="library-toolbar">
         <div className="library-filter-group" role="group" aria-label={language === 'ar' ? 'تصفية حسب النوع' : 'Filter by type'}>
           {[['all', language === 'ar' ? 'الكل' : 'All'], ['book', language === 'ar' ? 'كتب' : 'Books'], ['movie', language === 'ar' ? 'أفلام' : 'Movies'], ['game', language === 'ar' ? 'ألعاب' : 'Games'], ['memo', language === 'ar' ? 'مذكرات' : 'Notes']].map(([kind, label]) =>
@@ -451,6 +495,14 @@ export default function CollectionPage({ config, language, onUnauthorized, query
           ['all', language === 'ar' ? 'الكل' : 'All'],
         ].map(([key, label]) => <button className={`task-filter ${taskFilter === key ? 'active' : ''}`} type="button" key={key} onClick={() => setTaskFilter(key)}>{label}</button>)}
         <span className="task-filter-count">{filteredRows.length} {language === 'ar' ? 'مهمة' : 'tasks'}</span>
+        <div className="task-layout-switch" role="group" aria-label={language === 'ar' ? 'طريقة عرض المهام' : 'Task view'}>
+          <button type="button" className={taskLayout === 'list' ? 'active' : ''} aria-pressed={taskLayout === 'list'} onClick={() => chooseTaskLayout('list')}>
+            <span aria-hidden="true">☷</span>{language === 'ar' ? 'قائمة' : 'List'}
+          </button>
+          <button type="button" className={taskLayout === 'board' ? 'active' : ''} aria-pressed={taskLayout === 'board'} onClick={() => chooseTaskLayout('board')}>
+            <span aria-hidden="true">▤</span>{language === 'ar' ? 'لوحة' : 'Board'}
+          </button>
+        </div>
       </div>}
       {config.viewType === 'applications' && <div className="interview-filter-row" role="group" aria-label={language === 'ar' ? 'تصفية طلبات التوظيف' : 'Filter applications'}>
         {[
@@ -466,7 +518,31 @@ export default function CollectionPage({ config, language, onUnauthorized, query
         <span className="task-filter-count">{filteredRows.length} {language === 'ar' ? 'طلب' : 'applications'}</span>
       </div>}
       {(rows.length > 4 || config.viewType === 'reading' || config.viewType === 'tasks' || config.viewType === 'habits' || config.viewType === 'routines' || config.viewType === 'applications') && <div className="page-tools"><input className="search-box" aria-label={t.search} placeholder={t.search} value={filter} onChange={event => { setFilter(event.target.value); if (config.viewType === 'applications') setApplicationPage(1); if (config.viewType === 'reading') setReadingPage(1); }} /></div>}
-      {busy ? <p>{t.loading}</p> : !filteredRows.length ? <p className="notice">{t.empty}</p> : (
+      {busy ? <p>{t.loading}</p> : !filteredRows.length ? <p className="notice">{t.empty}</p> : config.viewType === 'tasks' && taskLayout === 'board' ? (
+        <div className="task-board" aria-label={language === 'ar' ? 'لوحة المهام' : 'Task board'}>
+          {[
+            { key: 'open', completed: false, label: language === 'ar' ? 'مفتوحة' : 'To do', icon: '○' },
+            { key: 'completed', completed: true, label: language === 'ar' ? 'مكتملة' : 'Completed', icon: '✓' },
+          ].map(column => {
+            const columnRows = filteredRows.filter(row => Boolean(row.completed) === column.completed);
+            return <section key={column.key} className={`task-board-column ${dragOverTaskColumn === column.key ? 'task-board-column-over' : ''}`}
+              onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverTaskColumn(column.key); }}
+              onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDragOverTaskColumn(''); }}
+              onDrop={event => {
+                event.preventDefault();
+                const row = rows.find(item => String(item.id) === event.dataTransfer.getData('text/plain'));
+                setDragOverTaskColumn('');
+                setDraggingTaskId(null);
+                if (row) setTaskCompleted(row, column.completed);
+              }}>
+              <header><span aria-hidden="true">{column.icon}</span><h2>{column.label}</h2><b>{columnRows.length}</b></header>
+              <div className="task-board-cards">{columnRows.length
+                ? columnRows.map(row => renderTask(row))
+                : <p className="task-board-empty">{language === 'ar' ? 'أفلت المهمة هنا أو أضف مهمة جديدة.' : 'Drop a task here or add a new one.'}</p>}</div>
+            </section>;
+          })}
+        </div>
+      ) : (
         <div className={`record-grid ${config.viewType === 'tasks' ? 'task-grid' : ''} ${config.viewType === 'routines' ? 'routine-grid' : ''} ${config.viewType === 'habits' ? 'habit-grid' : ''} ${config.viewType === 'library' ? `library-grid library-${libraryLayout}` : ''} ${config.viewType === 'reading' ? 'reading-grid' : ''}`}>
           {displayedRows.map(row => (
             config.viewType === 'tasks' ? renderTask(row) : config.viewType === 'routines' ? renderRoutine(row) :
