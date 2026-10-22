@@ -68,8 +68,10 @@
         </section>
       </div>
       <div id="quranPlayerWidget" class="quran-player-widget">
-        <button id="quranPlayerToggle" class="quran-player-toggle" type="button" aria-expanded="false" aria-controls="quranPlayerPanel" aria-label="تشغيل القرآن الكريم أو الراديو">
-          <span aria-hidden="true">♫</span><span class="quran-player-toggle-label">استماع</span>
+        <button id="quranPlayerToggle" class="quran-player-toggle" type="button" aria-expanded="false" aria-pressed="false" aria-controls="quranPlayerPanel" aria-label="تشغيل القرآن الكريم أو الراديو">
+          <span class="quran-player-icon" aria-hidden="true">♫</span>
+          <span class="quran-player-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span class="quran-player-toggle-label">استماع</span>
         </button>
         <section id="quranPlayerPanel" class="quran-player-panel hidden" aria-label="مشغل القرآن الكريم والراديو">
           <header><div><strong>استمع للقرآن الكريم</strong><small>تلاوات وإذاعات قرآنية</small></div><button id="quranPlayerClose" class="icon-button" type="button" aria-label="إغلاق">×</button></header>
@@ -122,6 +124,7 @@
         <a class="workspace-nav-link" href="#finance" aria-label="الماليات والاشتراكات"><span aria-hidden="true">¤</span><span class="workspace-nav-label">الماليات</span></a>
         <a class="workspace-nav-link" href="#timeline" aria-label="الخط الزمني"><span aria-hidden="true">⌁</span><span class="workspace-nav-label">الخط الزمني</span></a>
         <a class="workspace-nav-link" href="#clubs" aria-label="نادي الكتاب"><span aria-hidden="true">♧</span><span class="workspace-nav-label">نادي الكتاب</span></a>
+        <a class="workspace-nav-link" href="#interviews" aria-label="المقابلات والتقديمات"><span aria-hidden="true">▣</span><span class="workspace-nav-label">المقابلات</span></a>
       </div>
       <div class="workspace-nav-group">
         <span>مساحتك الهادئة</span>
@@ -168,6 +171,48 @@
         <select name="type" aria-label="نوع الالتقاط"><option value="task">مهمة</option><option value="note">مذكرة</option></select>
         <button class="button button-quiet" type="submit">التقاط سريع</button>
       </form>
+      <section class="focus-timer-panel" aria-labelledby="focusTimerHeading">
+        <div class="focus-timer-main">
+          <div class="focus-timer-heading"><p class="eyebrow">جلسة تركيز قصيرة، أثر مستمر</p><h3 id="focusTimerHeading">مؤقّت التركيز</h3></div>
+          <span id="focusTimerMode" class="focus-timer-mode">تركيز</span>
+          <strong id="focusTimerClock" class="focus-timer-clock" aria-live="off">25:00</strong>
+          <div class="focus-timer-controls">
+            <button id="focusTimerStart" class="button button-primary" type="button">ابدأ</button>
+            <button id="focusTimerPause" class="button button-quiet" type="button" disabled>إيقاف مؤقت</button>
+            <button id="focusTimerReset" class="small-button" type="button">إعادة الضبط</button>
+            <button id="focusTimerSync" class="small-button hidden" type="button">إعادة مزامنة XP</button>
+          </div>
+        </div>
+        <div class="focus-timer-settings">
+          <label>تركيز على مهمة
+            <select id="focusTodoSelect"><option value="">جلسة عامة</option></select>
+          </label>
+          <label>سياق الجلسة<input id="focusContextInput" maxlength="160" dir="auto" placeholder="مثال: التحضير للاجتماع"></label>
+          <label>مدة التركيز (دقيقة)<input id="focusDurationInput" type="number" min="1" max="180" step="1" value="25"></label>
+          <label>الاستراحة القصيرة (دقيقة)<input id="focusBreakInput" type="number" min="1" max="60" step="1" value="5"></label>
+          <button id="saveFocusSettings" class="small-button" type="button">حفظ المدد</button>
+        </div>
+        <div class="focus-ambience">
+          <label for="focusAmbienceSelect">أصوات التركيز</label>
+          <select id="focusAmbienceSelect">
+            <option value="off">بدون صوت</option>
+            <option value="white">ضوضاء بيضاء</option>
+            <option value="rain">مطر وسحب</option>
+            <option value="sea">أمواج البحر</option>
+            <option value="wind">نسيم هادئ</option>
+          </select>
+          <label class="focus-volume-label" for="focusAmbienceVolume">الصوت</label>
+          <input id="focusAmbienceVolume" type="range" min="0" max="100" value="28" aria-label="مستوى صوت الخلفية">
+          <button id="focusAmbienceToggle" class="small-button" type="button" aria-pressed="false">▶ تشغيل الصوت</button>
+          <span id="focusAmbienceStatus" class="field-hint" aria-live="polite"></span>
+        </div>
+        <div class="focus-xp-stats" aria-live="polite">
+          <span><strong id="focusTotalXp">٠</strong><small>XP إجمالي</small></span>
+          <span><strong id="focusSessionsCount">٠</strong><small>جلسات مكتملة</small></span>
+          <span><strong id="focusWeekXp">٠</strong><small>XP هذا الأسبوع</small></span>
+        </div>
+        <div id="focusSessionHistory" class="focus-session-history" aria-label="جلسات التركيز الأخيرة"></div>
+      </section>
       <div class="today-grid">
         <article class="today-panel"><h3>مواعيد اليوم</h3><div id="todayEvents" class="today-list"></div></article>
         <article class="today-panel"><h3>مهام اليوم</h3><div id="todayTasks" class="today-list"></div></article>
@@ -301,21 +346,42 @@
     </section>
 
     <section id="finance" class="workspace-section finance-workspace" aria-labelledby="financeHeading">
-      <div class="section-heading">
-        <div><p class="eyebrow">صورة أوضح لدخلك ومصروفاتك</p><h2 id="financeHeading">الماليات والاشتراكات</h2><p id="financeMonthLabel" class="field-hint"></p></div>
+      <div class="section-heading finance-heading">
+        <div class="finance-title-copy"><p class="eyebrow">قرارات مالية أوضح، خطوة بخطوة</p><h2 id="financeHeading">الماليات</h2><p id="financeMonthLabel" class="field-hint"></p></div>
         <div class="finance-heading-actions">
-          <label class="finance-month-picker">الشهر<input id="financeMonth" type="month"></label>
+          <div class="finance-month-control" aria-label="اختيار الشهر">
+            <button id="financePreviousMonth" class="icon-button" type="button" aria-label="الشهر السابق" title="الشهر السابق">‹</button>
+            <input id="financeMonth" type="month" aria-label="الشهر">
+            <button id="financeNextMonth" class="icon-button" type="button" aria-label="الشهر التالي" title="الشهر التالي">›</button>
+          </div>
           <button id="addFinanceTransaction" class="button button-primary" type="button">＋ عملية</button>
           <button id="addFinanceSubscription" class="button button-quiet" type="button">＋ اشتراك</button>
         </div>
       </div>
       <div id="financeSummary" class="finance-summary" aria-live="polite"></div>
+      <section class="finance-cashflow" aria-label="ملخص التدفق النقدي">
+        <div class="finance-cashflow-heading"><div><strong>التدفق النقدي</strong><span id="financeCashflowCaption">الدخل مقابل المصروفات هذا الشهر</span></div><strong id="financeCashflowBalance"></strong></div>
+        <div id="financeCashflowBar" class="finance-cashflow-bar" role="img" aria-label="نسبة الدخل إلى المصروفات"><span id="financeIncomeBar"></span><span id="financeExpenseBar"></span></div>
+        <div class="finance-cashflow-legend"><span><i class="is-income"></i>الدخل <strong id="financeIncomeLegend"></strong></span><span><i class="is-expense"></i>المصروفات <strong id="financeExpenseLegend"></strong></span></div>
+      </section>
       <div class="finance-layout">
         <section class="finance-panel" aria-labelledby="financeTransactionsHeading">
-          <div class="finance-panel-heading"><div><h3 id="financeTransactionsHeading">الدخل والمصروفات</h3><p>سجّل العمليات يدوياً، من غير ربط حساب بنكي.</p></div></div>
+          <div class="finance-panel-heading"><div><h3 id="financeTransactionsHeading">العمليات</h3><p>كل ما يدخل ويخرج من أموالك، في مكان واحد.</p></div><span id="financeTransactionCount" class="finance-count"></span></div>
+          <div class="finance-transactions-toolbar">
+            <label class="finance-search"><span aria-hidden="true">⌕</span><input id="financeSearch" type="search" dir="auto" placeholder="ابحث في العمليات" aria-label="ابحث في العمليات"></label>
+            <div id="financeTypeFilters" class="finance-type-filters" aria-label="تصفية العمليات">
+              <button class="is-active" type="button" data-finance-filter="all">الكل</button>
+              <button type="button" data-finance-filter="expense">مصروفات</button>
+              <button type="button" data-finance-filter="income">دخل</button>
+            </div>
+          </div>
           <div id="financeTransactionList" class="finance-transaction-list" aria-live="polite"></div>
         </section>
         <div class="finance-side-column">
+          <section class="finance-panel" aria-labelledby="financeSpendingHeading">
+            <div class="finance-panel-heading"><div><h3 id="financeSpendingHeading">أين تذهب أموالك؟</h3><p>أعلى تصنيفات الصرف لهذا الشهر.</p></div></div>
+            <div id="financeCategoryBreakdown" class="finance-category-breakdown"></div>
+          </section>
           <section class="finance-panel" aria-labelledby="financeBudgetHeading">
             <div class="finance-panel-heading"><div><h3 id="financeBudgetHeading">الميزانيات الشهرية</h3><p>قارن إنفاق كل تصنيف بالحد الذي حددته.</p></div><button id="addFinanceBudget" class="small-button" type="button">＋ ميزانية</button></div>
             <div id="financeBudgetList" class="finance-budget-list"></div>
@@ -343,6 +409,48 @@
         </div>
       </form>
       <div id="timelineList" class="timeline-list" aria-live="polite"></div>
+    </section>
+
+    <section id="interviews" class="workspace-section" aria-labelledby="interviewsHeading">
+      <header class="interview-hero">
+        <div class="interview-hero-copy"><p class="eyebrow">خطوتك القادمة تبدأ بالاستعداد</p><h2 id="interviewsHeading">مسارك المهني</h2><p>نظّم فرصك، تعلّم من كل مقابلة، واستعد بثقة لجولتك القادمة.</p></div>
+        <div class="interview-hero-mark" aria-hidden="true">✦</div>
+      </header>
+      <div id="interviewOverview" class="interview-overview" aria-live="polite"></div>
+      <nav class="interview-tabs" aria-label="مساحة المقابلات">
+        <button class="interview-tab is-active" type="button" data-interview-view="applications" aria-selected="true">▤ <span>طلبات التوظيف</span></button>
+        <button class="interview-tab" type="button" data-interview-view="practice" aria-selected="false">✧ <span>المقابلة التجريبية</span></button>
+      </nav>
+      <div id="interviewApplicationsPanel" class="interview-panel">
+        <div class="interview-panel-heading">
+          <div><h3>فرصك المهنية</h3><p>تابع الحالة والخطوات والملاحظات لكل وظيفة.</p></div>
+          <button id="addInterviewApplication" class="button button-primary" type="button">＋ طلب توظيف</button>
+        </div>
+        <div class="interview-application-toolbar">
+          <label class="interview-application-search">
+            <span aria-hidden="true">⌕</span>
+            <input id="interviewApplicationSearch" type="search" dir="auto" maxlength="160" placeholder="ابحث بالشركة أو المسمى الوظيفي" aria-label="ابحث في طلبات التوظيف">
+          </label>
+          <label class="interview-application-filter-label">تصفية حسب الحالة
+            <select id="interviewApplicationFilter" aria-label="تصفية طلبات التوظيف">
+              <option value="all">كل الطلبات</option>
+              <option value="active">قيد المتابعة</option>
+              <option value="interviewing">المقابلات</option>
+              <option value="offer">العروض الوظيفية</option>
+              <option value="closed">المغلقة</option>
+            </select>
+          </label>
+          <span id="interviewApplicationResultCount" class="interview-application-result-count" aria-live="polite"></span>
+        </div>
+        <div id="interviewApplicationList" class="interview-application-list" aria-live="polite"></div>
+      </div>
+      <div id="interviewPracticePanel" class="interview-panel hidden">
+        <div class="interview-panel-heading">
+          <div><h3>تدرّب بطريقتك</h3><p>أنشئ مواضيعك وبطاقات السؤال والإجابة، ثم اختبر نفسك.</p></div>
+          <button id="addInterviewTopic" class="button button-primary" type="button">＋ موضوع جديد</button>
+        </div>
+        <div id="interviewPracticeWorkspace" class="interview-practice-workspace" aria-live="polite"></div>
+      </div>
     </section>
 
     <section id="clubs" class="workspace-section" aria-labelledby="clubsHeading">
@@ -968,6 +1076,81 @@
       <h2>أحسنت! أنهيت مهام اليوم 🎉</h2>
       <p>خطوة بعد خطوة، أنجزت ما خططت له. خذ لحظة للاحتفال بهذا التقدم.</p>
       <button id="celebrationDone" class="button button-primary" type="button">رائع!</button>
+    </div>
+  </dialog>
+
+  <dialog id="interviewApplicationDialog" class="dialog">
+    <form id="interviewApplicationForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">مسار فرصك المهنية</p><h2 id="interviewApplicationDialogTitle">إضافة طلب توظيف</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <input name="id" type="hidden">
+      <label>الشركة<input name="company" required maxlength="160" dir="auto" placeholder="اسم الشركة"></label>
+      <label class="spaced">المسمى الوظيفي<input name="role" required maxlength="160" dir="auto" placeholder="المسمى الذي تقدمت إليه"></label>
+      <div class="interview-form-grid">
+        <label>الحالة<select name="status"><option value="applied">تم التقديم</option><option value="screening">مراجعة أولية</option><option value="interviewing">مقابلات</option><option value="offer">عرض وظيفي</option><option value="rejected">اعتذار</option><option value="withdrawn">انسحاب</option></select></label>
+        <label>تاريخ التقديم<input name="applied_on" type="date"></label>
+      </div>
+      <label class="spaced">رابط الوظيفة<input name="job_url" type="url" maxlength="2048" dir="ltr" placeholder="https://..."></label>
+      <label class="spaced">ملاحظات الطلب<textarea name="notes" rows="4" maxlength="6000" dir="auto" placeholder="جهة التواصل، متطلبات الوظيفة، خطوات المتابعة..."></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ الطلب</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="interviewRoundDialog" class="dialog">
+    <form id="interviewRoundForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">دوّن ما تريد تذكره</p><h2 id="interviewRoundDialogTitle">إضافة ملاحظات مقابلة</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <input name="applicationId" type="hidden">
+      <input name="roundId" type="hidden">
+      <label>اسم الجولة<input name="round_name" required maxlength="120" dir="auto" placeholder="مكالمة موارد بشرية، مقابلة تقنية..."></label>
+      <div class="interview-schedule-fields spaced">
+        <p class="eyebrow">جدولة المقابلة في التقويم (اختياري)</p>
+        <small>سيضاف الموعد إلى التقويم عند الحفظ.</small>
+        <label>موعد المقابلة<input name="scheduled_start" type="datetime-local"></label>
+        <label>وقت النهاية<input name="scheduled_end" type="datetime-local"></label>
+      </div>
+      <label class="spaced">تاريخ المقابلة أو سجلها<input name="occurred_on" type="date"></label>
+      <label class="spaced">أسئلة المقابِل وإجاباتي<textarea name="questions_answers" rows="7" maxlength="16000" dir="auto" placeholder="السؤال: ...&#10;إجابتي: ..."></textarea></label>
+      <label class="spaced">أسئلتي للمقابِل<textarea name="questions_for_them" rows="4" maxlength="8000" dir="auto" placeholder="ما الأسئلة التي سألتها؟ وما الإجابات المهمة؟"></textarea></label>
+      <label class="spaced">تجربتي وما تعلمته<textarea name="experience" rows="4" maxlength="8000" dir="auto" placeholder="كيف سارت المقابلة؟ ما الذي نجح وما الذي أريد تحسينه؟"></textarea></label>
+      <label class="spaced">الخطوة التالية<textarea name="follow_up" rows="3" maxlength="4000" dir="auto" placeholder="رسالة شكر، موعد متابعة، موضوع للتحضير..."></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ سجل المقابلة</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="interviewTopicDialog" class="dialog">
+    <form id="interviewTopicForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">تصنيفك، بطريقتك</p><h2 id="interviewTopicDialogTitle">موضوع تدريب جديد</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <input name="id" type="hidden">
+      <label>اسم الموضوع<input name="title" required maxlength="120" dir="auto" placeholder="مثال: تصميم الأنظمة أو قواعد البيانات"></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ الموضوع</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="interviewCardDialog" class="dialog">
+    <form id="interviewCardForm" class="dialog-card">
+      <div class="dialog-heading"><div><p id="interviewCardTopicLabel" class="eyebrow">بطاقة تدريب</p><h2 id="interviewCardDialogTitle">بطاقة سؤال جديدة</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <input name="topicId" type="hidden">
+      <input name="cardId" type="hidden">
+      <label>السؤال<textarea name="question" required maxlength="5000" rows="4" dir="auto" placeholder="اكتب سؤال المقابلة هنا..."></textarea></label>
+      <label class="spaced">إجابة مقترحة أو نقاط أساسية<textarea name="answer" required maxlength="10000" rows="6" dir="auto" placeholder="اكتب إجابتك أو النقاط التي تريد تذكرها..."></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ البطاقة</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="interviewQuizDialog" class="dialog interview-quiz-dialog">
+    <div class="dialog-card interview-quiz-card">
+      <div class="dialog-heading"><div><p id="interviewQuizTopic" class="eyebrow">مقابلة تجريبية</p><h2 id="interviewQuizProgress">السؤال 1 من 1</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <div class="interview-quiz-progress" role="progressbar" aria-label="تقدم الاختبار" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="interviewQuizProgressBar"></span></div>
+      <button id="interviewFlashcard" class="interview-flashcard" type="button" aria-label="إظهار الإجابة">
+        <span id="interviewFlashcardLabel" class="interview-flashcard-label">السؤال</span>
+        <span id="interviewFlashcardText" dir="auto"></span>
+        <small id="interviewFlashcardHint">اضغط لإظهار الإجابة</small>
+      </button>
+      <div id="interviewQuizActions" class="interview-quiz-actions hidden">
+        <button id="interviewQuizAgain" class="button interview-again-button" type="button">↻ أحتاج إلى مراجعة</button>
+        <button id="interviewQuizKnown" class="button button-primary" type="button">✓ أتقنتها</button>
+      </div>
+      <div id="interviewQuizSummary" class="interview-quiz-summary hidden"></div>
+      <div class="dialog-actions interview-quiz-footer"><button id="interviewQuizFinish" class="button button-primary hidden" type="button" data-close>إنهاء</button></div>
     </div>
   </dialog>
 

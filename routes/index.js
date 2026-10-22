@@ -10,10 +10,12 @@ const createLearningRouter = require('./learning');
 const createNotesRouter = require('./notes');
 const createPlanningRouter = require('./planning');
 const createTasksRouter = require('./tasks');
+const createInterviewsRouter = require('./interviews');
 
 function registerApiRoutes(app, services) {
   app.use('/api', createPlanningRouter(services.planning));
   app.use('/api', createActivityRouter(services.activity));
+  app.use('/api', createInterviewsRouter(services.interviews));
   app.use('/api', createTasksRouter(services.tasks));
   app.use('/api', createNotesRouter(services.notes));
   app.use('/api', createLearningRouter(services.learning));

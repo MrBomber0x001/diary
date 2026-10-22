@@ -47,8 +47,20 @@ assert.ok(migratedPreferenceColumns.includes('prayer_longitude'));
 assert.ok(migratedPreferenceColumns.includes('prayer_location'));
 assert.ok(migratedPreferenceColumns.includes('prayer_method'));
 assert.ok(migratedPreferenceColumns.includes('finance_currency'));
+assert.ok(migratedPreferenceColumns.includes('focus_duration_minutes'));
+assert.ok(migratedPreferenceColumns.includes('focus_break_minutes'));
+assert.ok(db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column.name === 'session_key'));
 assert.ok(migratedPreferenceColumns.includes('shortcut_todo'));
 assert.ok(db.prepare('PRAGMA table_info(bookmarks)').all().some(column => column.name === 'category'));
+assert.ok(db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column.name === 'todo_id'));
+assert.ok(db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column.name === 'elapsed_seconds'));
+assert.ok(db.prepare('PRAGMA table_info(interview_applications)').all().some(column => column.name === 'company'));
+assert.ok(db.prepare('PRAGMA table_info(interview_rounds)').all().some(column => column.name === 'questions_answers'));
+assert.ok(db.prepare('PRAGMA table_info(interview_rounds)').all().some(column => column.name === 'scheduled_start'));
+assert.ok(db.prepare('PRAGMA table_info(interview_rounds)').all().some(column => column.name === 'scheduled_end'));
+assert.ok(db.prepare('PRAGMA table_info(interview_rounds)').all().some(column => column.name === 'calendar_event_id'));
+assert.ok(db.prepare('PRAGMA table_info(interview_topics)').all().some(column => column.name === 'title'));
+assert.ok(db.prepare('PRAGMA table_info(interview_cards)').all().some(column => column.name === 'answer'));
 let server;
 let baseUrl;
 let ownerCookie;
@@ -269,10 +281,10 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   const downloadedLearningFile = await request(learningDetail.result.notes[0].files[0].url, { cookie: ownerCookie });
   assert.equal(downloadedLearningFile.response.status, 200);
   assert.equal(Buffer.from(downloadedLearningFile.result).toString('utf8'), 'Useful reference material');
-  const privateLearningTopic = await request(`/api/learning/topics/${learningTopic.result.id}`, {
-    cookie: await createAccount('learning_guest', 'guest-password-1234'),
-  });
+  const learningGuestCookie = await createAccount('learning_guest', 'guest-password-1234');
+  const privateLearningTopic = await request(`/api/learning/topics/${learningTopic.result.id}`, { cookie: learningGuestCookie });
   assert.equal(privateLearningTopic.response.status, 404);
+  assert.equal((await request('/api/focus', { cookie: learningGuestCookie })).result.total_xp, 0);
 
   const recurring = await jsonRequest('/api/todos', 'POST', {
     title: 'Regression monthly task',
@@ -283,6 +295,168 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     completed: false,
   }, ownerCookie);
   assert.equal(recurring.response.status, 201);
+  const application = await jsonRequest('/api/interviews', 'POST', {
+    company: 'Example Labs',
+    role: 'Software Engineer',
+    status: 'interviewing',
+    job_url: 'https://example.com/jobs/engineer',
+    applied_on: '2026-10-21',
+    notes: 'Prepare a concise project summary.',
+  }, ownerCookie);
+  assert.equal(application.response.status, 201);
+  assert.equal((await request('/api/interviews', { cookie: learningGuestCookie })).result.length, 0);
+  assert.equal((await request(`/api/interviews/${application.result.id}`, {
+    method: 'DELETE',
+    cookie: learningGuestCookie,
+  })).response.status, 404);
+  const interviewRound = await jsonRequest(`/api/interviews/${application.result.id}/rounds`, 'POST', {
+    round_name: 'Technical interview',
+    occurred_on: '2026-10-22',
+    scheduled_start: '2026-10-23T13:00',
+    scheduled_end: '2026-10-23T14:00',
+    questions_answers: 'Question: How do you test?\nAnswer: With focused regression tests.',
+    questions_for_them: 'How does the team review changes?',
+    experience: 'The discussion was thoughtful; review database indexes before the next round.',
+    follow_up: 'Send a thank-you note tomorrow.',
+  }, ownerCookie);
+  assert.equal(interviewRound.response.status, 201);
+  assert.ok(interviewRound.result.calendar_event_id);
+  const scheduledEvents = await request('/api/events?start=2026-10-23&end=2026-10-23', { cookie: ownerCookie });
+  assert.equal(scheduledEvents.result.length, 1);
+  assert.equal(scheduledEvents.result[0].id, interviewRound.result.calendar_event_id);
+  assert.match(scheduledEvents.result[0].title, /Software Engineer/);
+  assert.equal((await request(`/api/events/${interviewRound.result.calendar_event_id}`, {
+    method: 'DELETE',
+    cookie: learningGuestCookie,
+  })).response.status, 404);
+  assert.equal((await jsonRequest(`/api/interviews/${application.result.id}/rounds/${interviewRound.result.id}`, 'PUT', {
+    ...interviewRound.result,
+    scheduled_start: '2026-10-23T14:00',
+    scheduled_end: '2026-10-23T15:00',
+    experience: 'I learned to clarify assumptions before answering.',
+  }, ownerCookie)).response.status, 200);
+  const rescheduledEvents = await request('/api/events?start=2026-10-23&end=2026-10-23', { cookie: ownerCookie });
+  assert.equal(rescheduledEvents.result.length, 1);
+  assert.equal(rescheduledEvents.result[0].id, interviewRound.result.calendar_event_id);
+  assert.equal(rescheduledEvents.result[0].occurrence_start, '2026-10-23T14:00');
+  const invalidSchedule = await jsonRequest(`/api/interviews/${application.result.id}/rounds/${interviewRound.result.id}`, 'PUT', {
+    ...interviewRound.result,
+    scheduled_start: '2026-10-23T15:00',
+    scheduled_end: '2026-10-23T14:00',
+  }, ownerCookie);
+  assert.equal(invalidSchedule.response.status, 400);
+  const updatedApplication = await jsonRequest(`/api/interviews/${application.result.id}`, 'PUT', {
+    ...application.result,
+    status: 'offer',
+    role: 'Senior Software Engineer',
+  }, ownerCookie);
+  assert.equal(updatedApplication.response.status, 200);
+  const renamedApplicationEvents = await request('/api/events?start=2026-10-23&end=2026-10-23', { cookie: ownerCookie });
+  assert.match(renamedApplicationEvents.result[0].title, /Senior Software Engineer/);
+  const interviewApplications = await request('/api/interviews', { cookie: ownerCookie });
+  assert.equal(interviewApplications.result[0].rounds[0].questions_answers,
+    'Question: How do you test?\nAnswer: With focused regression tests.');
+  assert.equal(interviewApplications.result[0].rounds[0].scheduled_start, '2026-10-23T14:00');
+  assert.equal(interviewApplications.result[0].rounds[0].calendar_event_id, interviewRound.result.calendar_event_id);
+  assert.equal(interviewApplications.result[0].status, 'offer');
+  const cleanupApplication = await jsonRequest('/api/interviews', 'POST', {
+    company: 'Cleanup Labs',
+    role: 'Engineer',
+  }, ownerCookie);
+  const cleanupRound = await jsonRequest(`/api/interviews/${cleanupApplication.result.id}/rounds`, 'POST', {
+    round_name: 'Final interview',
+    scheduled_start: '2026-10-24T10:00',
+    scheduled_end: '2026-10-24T11:00',
+  }, ownerCookie);
+  assert.ok(cleanupRound.result.calendar_event_id);
+  assert.equal((await request(`/api/interviews/${cleanupApplication.result.id}/rounds/${cleanupRound.result.id}`, {
+    method: 'DELETE',
+    cookie: ownerCookie,
+  })).response.status, 200);
+  assert.equal((await request('/api/events?start=2026-10-24&end=2026-10-24', { cookie: ownerCookie })).result.length, 0);
+  const cleanupRoundForApplication = await jsonRequest(`/api/interviews/${cleanupApplication.result.id}/rounds`, 'POST', {
+    round_name: 'Final interview',
+    scheduled_start: '2026-10-24T10:00',
+    scheduled_end: '2026-10-24T11:00',
+  }, ownerCookie);
+  assert.ok(cleanupRoundForApplication.result.calendar_event_id);
+  assert.equal((await request(`/api/interviews/${cleanupApplication.result.id}`, {
+    method: 'DELETE',
+    cookie: ownerCookie,
+  })).response.status, 200);
+  assert.equal((await request('/api/events?start=2026-10-24&end=2026-10-24', { cookie: ownerCookie })).result.length, 0);
+  const mockTopic = await jsonRequest('/api/interviews/topics', 'POST', {
+    title: 'System Design',
+  }, ownerCookie);
+  assert.equal(mockTopic.response.status, 201);
+  const privateMockTopics = await request('/api/interviews/mock', { cookie: learningGuestCookie });
+  assert.deepEqual(privateMockTopics.result, []);
+  assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}`, 'PUT', {
+    title: 'System Design',
+  }, learningGuestCookie)).response.status, 404);
+  assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/cards`, 'POST', {
+    question: 'Design a rate limiter.',
+    answer: 'Use a token bucket backed by shared storage for distributed instances.',
+  }, learningGuestCookie)).response.status, 404);
+  const mockCard = await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/cards`, 'POST', {
+    question: 'Design a rate limiter.',
+    answer: 'Use a token bucket backed by shared storage for distributed instances.',
+  }, ownerCookie);
+  assert.equal(mockCard.response.status, 201);
+  assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/cards/${mockCard.result.id}`, 'PUT', {
+    ...mockCard.result,
+    answer: 'Use a token bucket with an atomic shared backing store.',
+  }, ownerCookie)).response.status, 200);
+  const mockTopics = await request('/api/interviews/mock', { cookie: ownerCookie });
+  assert.equal(mockTopics.result[0].title, 'System Design');
+  assert.equal(mockTopics.result[0].card_count, 1);
+  const mockCardPage = await request(`/api/interviews/topics/${mockTopic.result.id}/cards?page=1&pageSize=1`, { cookie: ownerCookie });
+  assert.equal(mockCardPage.result.total, 1);
+  assert.equal(mockCardPage.result.cards[0].answer, 'Use a token bucket with an atomic shared backing store.');
+  const mockQuiz = await request(`/api/interviews/topics/${mockTopic.result.id}/quiz?count=10`, { cookie: ownerCookie });
+  assert.equal(mockQuiz.result.cards.length, 1);
+  assert.equal((await request(`/api/interviews/topics/${mockTopic.result.id}/quiz?count=all`, { cookie: learningGuestCookie })).response.status, 404);
+  assert.equal((await request(`/api/interviews/topics/${mockTopic.result.id}/quiz?count=3`, { cookie: ownerCookie })).response.status, 400);
+  assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/cards`, 'POST', {
+    question: '',
+    answer: 'Missing question',
+  }, ownerCookie)).response.status, 400);
+  assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}`, 'DELETE', {}, learningGuestCookie)).response.status, 404);
+  const ownerUserId = db.prepare('SELECT id FROM users WHERE username=?').get('owner_test').id;
+  const bulkCardInsert = db.prepare(`INSERT INTO interview_cards(topic_id,user_id,question,answer,created_at,updated_at)
+    VALUES (?,?,?,?,?,?)`);
+  const bulkTimestamp = new Date().toISOString();
+  const insertBulkCards = db.transaction(() => {
+    for (let index = 0; index < 1000; index += 1) {
+      bulkCardInsert.run(mockTopic.result.id, ownerUserId, `Scale test question ${index + 1}`,
+        `Scale test answer ${index + 1}`, bulkTimestamp, bulkTimestamp);
+    }
+  });
+  insertBulkCards();
+  const largeTopicList = await request('/api/interviews/mock', { cookie: ownerCookie });
+  assert.equal(largeTopicList.result[0].card_count, 1001);
+  assert.equal(Object.hasOwn(largeTopicList.result[0], 'cards'), false);
+  const firstLargePage = await request(`/api/interviews/topics/${mockTopic.result.id}/cards?page=1&pageSize=20`, { cookie: ownerCookie });
+  assert.equal(firstLargePage.result.total, 1001);
+  assert.equal(firstLargePage.result.cards.length, 20);
+  assert.equal(firstLargePage.result.pageCount, 51);
+  const searchedCards = await request(`/api/interviews/topics/${mockTopic.result.id}/cards?q=Scale%20test%20question%201000&page=1&pageSize=20`, {
+    cookie: ownerCookie,
+  });
+  assert.equal(searchedCards.result.total, 1);
+  assert.equal(searchedCards.result.cards[0].question, 'Scale test question 1000');
+  const sampledQuiz = await request(`/api/interviews/topics/${mockTopic.result.id}/quiz?count=10`, { cookie: ownerCookie });
+  assert.equal(sampledQuiz.result.cards.length, 10);
+  assert.equal((await request(`/api/interviews/topics/${mockTopic.result.id}/quiz?count=10`, {
+    cookie: learningGuestCookie,
+  })).response.status, 404);
+  db.prepare('DELETE FROM interview_cards WHERE topic_id=? AND question LIKE ?')
+    .run(mockTopic.result.id, 'Scale test question %');
+  assert.equal((await jsonRequest('/api/interviews', 'POST', {
+    company: 'Bad status',
+    role: 'Engineer',
+    status: 'unknown',
+  }, ownerCookie)).response.status, 400);
   const completed = await jsonRequest(`/api/todos/${recurring.result.id}`, 'PUT', {
     ...recurring.result,
     completed: true,
@@ -317,6 +491,8 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     prayerLocation: 'Cairo',
     prayerMethod: 5,
     financeCurrency: 'EGP',
+    focusDurationMinutes: 30,
+    focusBreakMinutes: 10,
     shortcuts: {
       todo: 'Ctrl+Alt+Shift+KeyA',
       dailyNote: 'Ctrl+Alt+Shift+KeyD',
@@ -341,6 +517,8 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(savedPreferences.result.prayerLocation, 'Cairo');
   assert.equal(savedPreferences.result.prayerMethod, 5);
   assert.equal(savedPreferences.result.financeCurrency, 'EGP');
+  assert.equal(savedPreferences.result.focusDurationMinutes, 30);
+  assert.equal(savedPreferences.result.focusBreakMinutes, 10);
   assert.deepEqual(savedPreferences.result.shortcuts, {
     todo: 'Ctrl+Alt+Shift+KeyA',
     dailyNote: 'Ctrl+Alt+Shift+KeyD',
@@ -357,6 +535,69 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(changedFinanceCurrency.response.status, 200);
   assert.equal((await request('/api/settings', { cookie: ownerCookie })).result.financeCurrency, 'USD');
   assert.equal((await jsonRequest('/api/settings', 'PUT', { financeCurrency: 'EGP' }, ownerCookie)).response.status, 200);
+  assert.equal((await jsonRequest('/api/settings', 'PUT', { focusDurationMinutes: 181 }, ownerCookie)).response.status, 400);
+  assert.equal((await jsonRequest('/api/settings', 'PUT', { focusBreakMinutes: 0 }, ownerCookie)).response.status, 400);
+  const focusSessionStart = await jsonRequest('/api/focus/start', 'POST', {
+    session_key: 'regression-focus-session-1',
+    focus_minutes: 25,
+    todo_id: recurring.result.id,
+    context_label: 'Review the test project',
+  }, ownerCookie);
+  assert.equal(focusSessionStart.response.status, 201);
+  assert.equal((await jsonRequest('/api/focus/complete', 'POST', {
+    session_key: 'regression-focus-session-1',
+  }, ownerCookie)).response.status, 409);
+  const pausedFocus = await jsonRequest('/api/focus/pause', 'POST', {
+    session_key: 'regression-focus-session-1',
+  }, ownerCookie);
+  assert.equal(pausedFocus.result.paused, true);
+  db.prepare('UPDATE focus_sessions SET elapsed_seconds=?,paused=1 WHERE session_key=?')
+    .run(24 * 60, 'regression-focus-session-1');
+  const resumedFocus = await jsonRequest('/api/focus/start', 'POST', {
+    session_key: 'regression-focus-session-1',
+    focus_minutes: 25,
+    todo_id: recurring.result.id,
+    context_label: 'Review the test project',
+  }, ownerCookie);
+  assert.equal(resumedFocus.result.paused, 0);
+  db.prepare('UPDATE focus_sessions SET started_at=? WHERE session_key=?')
+    .run(new Date(Date.now() - 61 * 1000).toISOString(), 'regression-focus-session-1');
+  const focusSession = await jsonRequest('/api/focus/complete', 'POST', {
+    session_key: 'regression-focus-session-1',
+  }, ownerCookie);
+  assert.equal(focusSession.response.status, 200);
+  assert.equal(focusSession.result.xp_earned, 25);
+  assert.equal(focusSession.result.total_xp, 25);
+  assert.equal(focusSession.result.completed_sessions, 1);
+  assert.equal(focusSession.result.sessions[0].todo_id, recurring.result.id);
+  assert.equal(focusSession.result.sessions[0].context_label, 'Review the test project');
+  assert.equal(focusSession.result.sessions[0].todo_title, recurring.result.title);
+  const duplicateFocusSession = await jsonRequest('/api/focus/complete', 'POST', {
+    session_key: 'regression-focus-session-1',
+  }, ownerCookie);
+  assert.equal(duplicateFocusSession.result.xp_earned, 25);
+  assert.equal(duplicateFocusSession.result.total_xp, 25);
+  assert.equal((await request('/api/focus', { cookie: ownerCookie })).result.focus_minutes, 25);
+  assert.equal((await request('/api/focus', { cookie: learningGuestCookie })).result.total_xp, 0);
+  assert.equal((await jsonRequest('/api/focus/start', 'POST', {
+    session_key: 'guest-link-to-owner',
+    focus_minutes: 10,
+    todo_id: recurring.result.id,
+  }, learningGuestCookie)).response.status, 400);
+  assert.equal((await jsonRequest('/api/focus/start', 'POST', {
+    session_key: 'regression-focus-cancel-1',
+    focus_minutes: 10,
+  }, ownerCookie)).response.status, 201);
+  const cancelledFocus = await request('/api/focus/regression-focus-cancel-1', { method: 'DELETE', cookie: ownerCookie });
+  assert.equal(cancelledFocus.result.cancelled, true);
+  assert.equal((await jsonRequest('/api/focus/complete', 'POST', {
+    session_key: 'regression-focus-cancel-1',
+  }, ownerCookie)).response.status, 404);
+  assert.equal((await request('/api/focus', { cookie: ownerCookie })).result.total_xp, 25);
+  assert.equal((await jsonRequest('/api/focus/start', 'POST', {
+    session_key: 'bad',
+    focus_minutes: 181,
+  }, ownerCookie)).response.status, 400);
   const invalidFinanceMonth = await request('/api/finance?month=2024-13', { cookie: ownerCookie });
   assert.equal(invalidFinanceMonth.response.status, 400);
   const emptyFinance = await request('/api/finance?month=2024-01', { cookie: ownerCookie });
@@ -390,6 +631,8 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     name: 'Music', amount: '39.99', billing_cycle: 'monthly', next_renewal_date: '2024-01-31', category: 'Entertainment',
   }, ownerCookie);
   assert.equal(monthlySubscription.response.status, 201);
+  assert.ok((await request('/api/finance/reminders', { cookie: ownerCookie })).result
+    .some(subscription => subscription.id === monthlySubscription.result.id));
   const monthlyPayment = await jsonRequest(`/api/finance/subscriptions/${monthlySubscription.result.id}/pay`, 'POST', {
     period: '2024-01-31', paid_date: '2024-01-31',
   }, ownerCookie);
@@ -712,6 +955,12 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal((await request(`/api/items/${itemId}`, { cookie: ownerCookie })).result.title, 'Regression handbook');
   assert.equal((await request('/api/book-clubs', { cookie: ownerCookie })).result
     .some(club => club.id === backupClub.result.id), true);
+  const restoredMockTopics = await request('/api/interviews/mock', { cookie: ownerCookie });
+  assert.equal(restoredMockTopics.result[0].title, 'System Design');
+  assert.equal(restoredMockTopics.result[0].card_count, 1);
+  const restoredMockCards = await request(`/api/interviews/topics/${mockTopic.result.id}/cards`, { cookie: ownerCookie });
+  assert.equal(restoredMockCards.result.cards[0].answer, 'Use a token bucket with an atomic shared backing store.');
+  assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}/cards/${mockCard.result.id}`, 'DELETE', {}, ownerCookie)).response.status, 200);
   const restoredClub = await request(`/api/book-clubs/${backupClub.result.id}`, { cookie: ownerCookie });
   assert.equal(restoredClub.response.status, 200);
   assert.equal(restoredClub.result.books[0].my_status, 'completed');
@@ -723,6 +972,16 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(restoredFinance.result.budgets[0].category, 'Food');
   assert.ok(restoredFinance.result.subscriptions.some(subscription => subscription.name === 'Music'
     && subscription.next_renewal_date === '2024-02-29'));
+  const restoredFocus = await request('/api/focus', { cookie: ownerCookie });
+  assert.equal(restoredFocus.result.total_xp, 25);
+  assert.equal(restoredFocus.result.completed_sessions, 1);
+  const restoredPreferences = await request('/api/settings', { cookie: ownerCookie });
+  assert.equal(restoredPreferences.result.focusDurationMinutes, 30);
+  assert.equal(restoredPreferences.result.focusBreakMinutes, 10);
+  const restoredApplications = await request('/api/interviews', { cookie: ownerCookie });
+  assert.equal(restoredApplications.result[0].company, 'Example Labs');
+  assert.equal(restoredApplications.result[0].status, 'offer');
+  assert.equal(restoredApplications.result[0].rounds[0].experience, 'I learned to clarify assumptions before answering.');
   assert.ok(restoredClub.result.messages.some(message => message.attachments.some(file => file.display_name === 'club-note.txt')));
   assert.equal(restoredClub.result.invites.length, 1);
   const restoredAttachment = restoredClub.result.messages.flatMap(message => message.attachments)

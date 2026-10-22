@@ -53,7 +53,7 @@ function createManagementRouter({
     const preference = db.prepare(`SELECT edit_mode,notification_enabled,theme_mode,reminder_minutes,
       notification_sound_enabled,markdown_rendering_enabled,markdown_toolbar_enabled,markdown_image_paste_enabled,
       font_size_offset,line_spacing,font_family,language,prayer_latitude,prayer_longitude,prayer_location,prayer_method,
-      finance_currency,shortcut_todo,shortcut_daily_note,shortcut_read_later,shortcut_quick_create
+      finance_currency,focus_duration_minutes,focus_break_minutes,shortcut_todo,shortcut_daily_note,shortcut_read_later,shortcut_quick_create
       FROM user_preferences WHERE user_id=?`).get(req.user.id);
     const isOwner = Boolean(db.prepare('SELECT is_owner FROM users WHERE id=?').get(req.user.id)?.is_owner);
     const cloud = getS3Settings();
@@ -75,6 +75,8 @@ function createManagementRouter({
       prayerLocation: preference?.prayer_location || '',
       prayerMethod: preference?.prayer_method || 5,
       financeCurrency: preference?.finance_currency || 'EGP',
+      focusDurationMinutes: preference?.focus_duration_minutes || 25,
+      focusBreakMinutes: preference?.focus_break_minutes || 5,
       shortcuts: {
         todo: preference?.shortcut_todo || 'Ctrl+Alt+Shift+KeyT',
         dailyNote: preference?.shortcut_daily_note || 'Ctrl+Alt+Shift+KeyD',
@@ -152,6 +154,12 @@ function createManagementRouter({
     const financeCurrency = Object.prototype.hasOwnProperty.call(req.body || {}, 'financeCurrency')
       ? text(req.body.financeCurrency)
       : existingPreference?.finance_currency || 'EGP';
+    const focusDurationMinutes = Object.prototype.hasOwnProperty.call(req.body || {}, 'focusDurationMinutes')
+      ? Number(req.body.focusDurationMinutes)
+      : existingPreference?.focus_duration_minutes || 25;
+    const focusBreakMinutes = Object.prototype.hasOwnProperty.call(req.body || {}, 'focusBreakMinutes')
+      ? Number(req.body.focusBreakMinutes)
+      : existingPreference?.focus_break_minutes || 5;
     const shortcutKeys = ['todo', 'dailyNote', 'readLater', 'quickCreate'];
     const shortcutDefaults = {
       todo: 'Ctrl+Alt+Shift+KeyT',
@@ -179,6 +187,8 @@ function createManagementRouter({
       || prayerLocation.length > 120
       || ![3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(prayerMethod)
       || !supportedCurrencies.has(financeCurrency)
+      || !Number.isInteger(focusDurationMinutes) || focusDurationMinutes < 1 || focusDurationMinutes > 180
+      || !Number.isInteger(focusBreakMinutes) || focusBreakMinutes < 1 || focusBreakMinutes > 60
       || Object.values(shortcuts).some(value => typeof value !== 'string' || (value && !validShortcutPattern.test(value)))
       || new Set(Object.values(shortcuts).filter(Boolean)).size !== Object.values(shortcuts).filter(Boolean).length
       || Object.values(preferenceBooleans).some(value => typeof value !== 'boolean')) {
@@ -222,8 +232,8 @@ function createManagementRouter({
     db.prepare(`INSERT INTO user_preferences(user_id,edit_mode,notification_enabled,theme_mode,reminder_minutes,
       notification_sound_enabled,markdown_rendering_enabled,markdown_toolbar_enabled,markdown_image_paste_enabled,
       font_size_offset,line_spacing,font_family,shortcut_todo,shortcut_daily_note,shortcut_read_later,shortcut_quick_create,language,
-      prayer_latitude,prayer_longitude,prayer_location,prayer_method,finance_currency)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      prayer_latitude,prayer_longitude,prayer_location,prayer_method,finance_currency,focus_duration_minutes,focus_break_minutes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(user_id) DO UPDATE SET edit_mode=excluded.edit_mode,
         notification_enabled=excluded.notification_enabled,theme_mode=excluded.theme_mode,
         reminder_minutes=excluded.reminder_minutes,notification_sound_enabled=excluded.notification_sound_enabled,
@@ -233,12 +243,14 @@ function createManagementRouter({
         shortcut_daily_note=excluded.shortcut_daily_note,shortcut_read_later=excluded.shortcut_read_later,
         shortcut_quick_create=excluded.shortcut_quick_create,language=excluded.language,
         prayer_latitude=excluded.prayer_latitude,prayer_longitude=excluded.prayer_longitude,
-        prayer_location=excluded.prayer_location,prayer_method=excluded.prayer_method,finance_currency=excluded.finance_currency`)
+        prayer_location=excluded.prayer_location,prayer_method=excluded.prayer_method,finance_currency=excluded.finance_currency,
+        focus_duration_minutes=excluded.focus_duration_minutes,focus_break_minutes=excluded.focus_break_minutes`)
       .run(req.user.id, editMode, Number(notificationsEnabled), themeMode, reminderMinutes,
         Number(preferenceBooleans.notificationSoundEnabled), Number(preferenceBooleans.markdownRenderingEnabled),
         Number(preferenceBooleans.markdownToolbarEnabled), Number(preferenceBooleans.markdownImagePasteEnabled),
         fontSizeOffset, lineSpacing, fontFamily, shortcuts.todo, shortcuts.dailyNote,
-        shortcuts.readLater, shortcuts.quickCreate, language, prayerLatitude, prayerLongitude, prayerLocation, prayerMethod, financeCurrency);
+        shortcuts.readLater, shortcuts.quickCreate, language, prayerLatitude, prayerLongitude, prayerLocation, prayerMethod, financeCurrency,
+        focusDurationMinutes, focusBreakMinutes);
     if (hasBackupSetting) {
       db.prepare("UPDATE application_settings SET value=? WHERE key='daily_backup_enabled'").run(enabled ? '1' : '0');
       if (enabled) scheduleDailyBackup();

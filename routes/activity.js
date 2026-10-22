@@ -251,6 +251,107 @@ function createActivityRouter({ db, now, text, localToday, localTime, validDate 
     res.json({ ok: true, completed });
   });
 
+  const focusStats = userId => {
+    const today = localToday();
+    const weekStart = dateAfter(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
+    const totals = db.prepare(`SELECT COUNT(completed_at) AS completed_sessions,
+      COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN focus_minutes ELSE 0 END),0) AS focus_minutes,
+      COALESCE(SUM(xp_earned),0) AS total_xp,
+      COALESCE(SUM(CASE WHEN substr(completed_at,1,10)>=? THEN xp_earned ELSE 0 END),0) AS week_xp
+      FROM focus_sessions WHERE user_id=?`).get(weekStart, userId);
+    const sessions = db.prepare(`SELECT f.id,f.focus_minutes,f.xp_earned,f.todo_id,f.context_label,f.started_at,f.completed_at,
+      t.title AS todo_title FROM focus_sessions f LEFT JOIN todos t ON t.id=f.todo_id
+      WHERE f.user_id=? AND f.completed_at IS NOT NULL ORDER BY f.completed_at DESC LIMIT 20`).all(userId);
+    return { ...totals, sessions };
+  };
+
+  router.get('/focus', (req, res) => res.json(focusStats(req.user.id)));
+
+  router.post('/focus/start', (req, res) => {
+    const sessionKey = typeof req.body?.session_key === 'string' ? req.body.session_key.trim() : '';
+    const focusMinutes = Number(req.body?.focus_minutes);
+    const todoId = req.body?.todo_id === null || req.body?.todo_id === '' || req.body?.todo_id === undefined
+      ? null : Number(req.body.todo_id);
+    const contextLabel = typeof req.body?.context_label === 'string' ? req.body.context_label.trim() : '';
+    if (!/^[a-zA-Z0-9_-]{8,80}$/.test(sessionKey)
+      || !Number.isInteger(focusMinutes) || focusMinutes < 1 || focusMinutes > 180
+      || (todoId !== null && (!Number.isInteger(todoId) || todoId < 1))
+      || contextLabel.length > 160) {
+      return res.status(400).json({ error: 'تحقق من معرّف جلسة التركيز ومدتها وسياقها.' });
+    }
+    const existing = db.prepare('SELECT id,focus_minutes,todo_id,context_label,started_at,completed_at,paused FROM focus_sessions WHERE user_id=? AND session_key=?')
+      .get(req.user.id, sessionKey);
+    if (existing) {
+      if (existing.focus_minutes !== focusMinutes || (existing.todo_id !== todoId && existing.todo_id !== null)
+        || existing.context_label !== contextLabel || existing.completed_at) {
+        return res.status(409).json({ error: 'معرّف الجلسة مستخدم بالفعل.' });
+      }
+      if (existing.paused) {
+        const resumedAt = now();
+        db.prepare('UPDATE focus_sessions SET started_at=?,paused=0 WHERE id=? AND user_id=? AND completed_at IS NULL')
+          .run(resumedAt, existing.id, req.user.id);
+        return res.json({ ...existing, started_at: resumedAt, paused: 0 });
+      }
+      return res.json(existing);
+    }
+    if (todoId !== null && !db.prepare('SELECT id FROM todos WHERE id=? AND user_id=? AND deleted_at IS NULL').get(todoId, req.user.id)) {
+      return res.status(400).json({ error: 'المهمة المختارة غير موجودة.' });
+    }
+    const startedAt = now();
+    db.prepare(`INSERT INTO focus_sessions(user_id,session_key,focus_minutes,todo_id,context_label,started_at,created_at)
+      VALUES (?,?,?,?,?,?,?)`).run(req.user.id, sessionKey, focusMinutes, todoId, contextLabel, startedAt, startedAt);
+    const session = db.prepare(`SELECT f.id,f.focus_minutes,f.todo_id,f.context_label,f.started_at,f.completed_at,t.title AS todo_title
+      FROM focus_sessions f LEFT JOIN todos t ON t.id=f.todo_id WHERE f.user_id=? AND f.session_key=?`)
+      .get(req.user.id, sessionKey);
+    res.status(201).json(session);
+  });
+
+  router.post('/focus/complete', (req, res) => {
+    const sessionKey = typeof req.body?.session_key === 'string' ? req.body.session_key.trim() : '';
+    if (!/^[a-zA-Z0-9_-]{8,80}$/.test(sessionKey)) {
+      return res.status(400).json({ error: 'معرّف جلسة التركيز غير صالح.' });
+    }
+    const session = db.prepare('SELECT id,focus_minutes,xp_earned,started_at,elapsed_seconds,paused,completed_at FROM focus_sessions WHERE user_id=? AND session_key=?')
+      .get(req.user.id, sessionKey);
+    if (!session) return res.status(404).json({ error: 'جلسة التركيز غير موجودة.' });
+    const activeSeconds = session.paused ? 0 : Math.max(0, Math.floor((Date.parse(now()) - Date.parse(session.started_at)) / 1000));
+    if (!session.completed_at && session.elapsed_seconds + activeSeconds < session.focus_minutes * 60) {
+      return res.status(409).json({ error: 'لم تكتمل مدة جلسة التركيز بعد.' });
+    }
+    if (!session.completed_at) {
+      const completedAt = now();
+      db.prepare('UPDATE focus_sessions SET xp_earned=focus_minutes,completed_at=? WHERE id=? AND user_id=? AND completed_at IS NULL')
+        .run(completedAt, session.id, req.user.id);
+    }
+    const completed = db.prepare(`SELECT f.id,f.focus_minutes,f.xp_earned,f.todo_id,f.context_label,t.title AS todo_title,f.completed_at
+      FROM focus_sessions f LEFT JOIN todos t ON t.id=f.todo_id WHERE f.id=? AND f.user_id=?`)
+      .get(session.id, req.user.id);
+    res.json({ ...completed, ...focusStats(req.user.id) });
+  });
+
+  router.post('/focus/pause', (req, res) => {
+    const sessionKey = typeof req.body?.session_key === 'string' ? req.body.session_key.trim() : '';
+    if (!/^[a-zA-Z0-9_-]{8,80}$/.test(sessionKey)) {
+      return res.status(400).json({ error: 'معرّف جلسة التركيز غير صالح.' });
+    }
+    const session = db.prepare(`SELECT id,started_at,elapsed_seconds,paused,completed_at
+      FROM focus_sessions WHERE user_id=? AND session_key=?`).get(req.user.id, sessionKey);
+    if (!session) return res.status(404).json({ error: 'جلسة التركيز غير موجودة.' });
+    if (session.completed_at) return res.status(409).json({ error: 'جلسة التركيز مكتملة بالفعل.' });
+    if (session.paused) return res.json({ ok: true, elapsed_seconds: session.elapsed_seconds, paused: true });
+    const elapsedSeconds = session.elapsed_seconds
+      + Math.max(0, Math.floor((Date.parse(now()) - Date.parse(session.started_at)) / 1000));
+    db.prepare('UPDATE focus_sessions SET elapsed_seconds=?,paused=1 WHERE id=? AND user_id=? AND completed_at IS NULL')
+      .run(elapsedSeconds, session.id, req.user.id);
+    res.json({ ok: true, elapsed_seconds: elapsedSeconds, paused: true });
+  });
+
+  router.delete('/focus/:sessionKey', (req, res) => {
+    const result = db.prepare('DELETE FROM focus_sessions WHERE user_id=? AND session_key=? AND completed_at IS NULL')
+      .run(req.user.id, req.params.sessionKey);
+    res.json({ ok: true, cancelled: result.changes > 0 });
+  });
+
   router.get('/today', (req, res) => {
     const today = localToday();
     const dayStart = `${today}T00:00`;

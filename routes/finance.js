@@ -81,6 +81,12 @@ function createFinanceRouter({ db, text, now, localToday }) {
     return date.toISOString().slice(0, 10);
   }
 
+  router.get('/finance/reminders', (req, res) => {
+    res.json(db.prepare(`SELECT id,name,next_renewal_date
+      FROM finance_subscriptions WHERE user_id=? AND status='active'
+      ORDER BY next_renewal_date,name`).all(req.user.id));
+  });
+
   router.get('/finance', (req, res) => {
     const month = text(req.query.month) || localToday().slice(0, 7);
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'اختر شهراً صحيحاً.' });
@@ -128,6 +134,7 @@ function createFinanceRouter({ db, text, now, localToday }) {
       subscriptions,
       budgets,
     });
+
   });
 
   router.post('/finance/transactions', (req, res) => {

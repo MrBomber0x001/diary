@@ -135,6 +135,8 @@ db.exec(`
     prayer_location TEXT NOT NULL DEFAULT '',
     prayer_method INTEGER NOT NULL DEFAULT 5 CHECK (prayer_method IN (3,4,5,7,8,9,10,11,12,13,14,15,16,17)),
     finance_currency TEXT NOT NULL DEFAULT 'EGP' CHECK (length(finance_currency)=3),
+    focus_duration_minutes INTEGER NOT NULL DEFAULT 25 CHECK (focus_duration_minutes BETWEEN 1 AND 180),
+    focus_break_minutes INTEGER NOT NULL DEFAULT 5 CHECK (focus_break_minutes BETWEEN 1 AND 60),
     shortcut_todo TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyT',
     shortcut_daily_note TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyD',
     shortcut_read_later TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyR',
@@ -411,6 +413,8 @@ for (const [table, column, definition] of [
   ['user_preferences', 'prayer_location', "TEXT NOT NULL DEFAULT ''"],
   ['user_preferences', 'prayer_method', 'INTEGER NOT NULL DEFAULT 5 CHECK (prayer_method IN (3,4,5,7,8,9,10,11,12,13,14,15,16,17))'],
   ['user_preferences', 'finance_currency', "TEXT NOT NULL DEFAULT 'EGP' CHECK (length(finance_currency)=3)"],
+  ['user_preferences', 'focus_duration_minutes', 'INTEGER NOT NULL DEFAULT 25 CHECK (focus_duration_minutes BETWEEN 1 AND 180)'],
+  ['user_preferences', 'focus_break_minutes', 'INTEGER NOT NULL DEFAULT 5 CHECK (focus_break_minutes BETWEEN 1 AND 60)'],
   ['user_preferences', 'shortcut_todo', "TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyT'"],
   ['user_preferences', 'shortcut_daily_note', "TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyD'"],
   ['user_preferences', 'shortcut_read_later', "TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyR'"],
@@ -522,9 +526,87 @@ db.exec(`
     completed_at TEXT NOT NULL,
     UNIQUE(routine_id,routine_date)
   );
+  CREATE TABLE IF NOT EXISTS focus_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_key TEXT NOT NULL,
+    focus_minutes INTEGER NOT NULL CHECK (focus_minutes BETWEEN 1 AND 180),
+    xp_earned INTEGER NOT NULL DEFAULT 0 CHECK (xp_earned IN (0,focus_minutes)),
+    todo_id INTEGER REFERENCES todos(id) ON DELETE SET NULL,
+    context_label TEXT NOT NULL DEFAULT '',
+    elapsed_seconds INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
+    paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0,1)),
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    created_at TEXT NOT NULL,
+    CHECK ((completed_at IS NULL AND xp_earned=0) OR (completed_at IS NOT NULL AND xp_earned=focus_minutes)),
+    UNIQUE(user_id,session_key)
+  );
+  CREATE TABLE IF NOT EXISTS interview_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    company TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'applied' CHECK (status IN ('applied','screening','interviewing','offer','rejected','withdrawn')),
+    job_url TEXT NOT NULL DEFAULT '',
+    applied_on TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS interview_rounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id INTEGER NOT NULL REFERENCES interview_applications(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    round_name TEXT NOT NULL,
+    occurred_on TEXT,
+    questions_answers TEXT NOT NULL DEFAULT '',
+    questions_for_them TEXT NOT NULL DEFAULT '',
+    experience TEXT NOT NULL DEFAULT '',
+    follow_up TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS interview_topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS interview_cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id INTEGER NOT NULL REFERENCES interview_topics(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `);
+if (!db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column.name === 'todo_id')) {
+  db.exec('ALTER TABLE focus_sessions ADD COLUMN todo_id INTEGER REFERENCES todos(id) ON DELETE SET NULL');
+}
+if (!db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column.name === 'context_label')) {
+  db.exec("ALTER TABLE focus_sessions ADD COLUMN context_label TEXT NOT NULL DEFAULT ''");
+}
+if (!db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column.name === 'elapsed_seconds')) {
+  db.exec('ALTER TABLE focus_sessions ADD COLUMN elapsed_seconds INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0)');
+}
+if (!db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column.name === 'paused')) {
+  db.exec('ALTER TABLE focus_sessions ADD COLUMN paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0,1))');
+}
 if (!db.prepare('PRAGMA table_info(todos)').all().some(column => column.name === 'project_id')) {
   db.exec('ALTER TABLE todos ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL');
+}
+if (!db.prepare('PRAGMA table_info(interview_rounds)').all().some(column => column.name === 'scheduled_start')) {
+  db.exec('ALTER TABLE interview_rounds ADD COLUMN scheduled_start TEXT');
+}
+if (!db.prepare('PRAGMA table_info(interview_rounds)').all().some(column => column.name === 'scheduled_end')) {
+  db.exec('ALTER TABLE interview_rounds ADD COLUMN scheduled_end TEXT');
+}
+if (!db.prepare('PRAGMA table_info(interview_rounds)').all().some(column => column.name === 'calendar_event_id')) {
+  db.exec('ALTER TABLE interview_rounds ADD COLUMN calendar_event_id INTEGER REFERENCES calendar_events(id) ON DELETE SET NULL');
 }
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_goals_user_status ON goals(user_id,status,target_date);
@@ -533,6 +615,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_habits_user_active ON habits(user_id,archived,title);
   CREATE INDEX IF NOT EXISTS idx_habit_logs_user_date ON habit_logs(user_id,habit_date);
   CREATE INDEX IF NOT EXISTS idx_routines_user_active ON routines(user_id,archived,position);
+  CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_completed ON focus_sessions(user_id,completed_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_interview_applications_user_status ON interview_applications(user_id,status,updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_interview_rounds_application ON interview_rounds(application_id,occurred_on DESC,id DESC);
+  CREATE INDEX IF NOT EXISTS idx_interview_topics_user_title ON interview_topics(user_id,title);
+  CREATE INDEX IF NOT EXISTS idx_interview_cards_topic ON interview_cards(topic_id,user_id,id);
 `);
 db.prepare("INSERT OR IGNORE INTO application_settings(key,value) VALUES ('daily_backup_enabled','1')").run();
 for (const [key, value] of [
@@ -997,6 +1084,11 @@ const restoreTables = [
   'habit_logs',
   'routines',
   'routine_logs',
+  'focus_sessions',
+  'interview_applications',
+  'interview_rounds',
+  'interview_topics',
+  'interview_cards',
   'book_clubs',
   'book_club_members',
   'book_club_invites',
@@ -1051,7 +1143,7 @@ function restoreDatabaseFrom(filePath, sourceTables) {
       const deleteOrder = ['sessions', 'learning_files', 'learning_notes', 'learning_topics',
         'finance_transactions', 'finance_budgets', 'finance_subscriptions',
         'progress_events', 'chapters', 'audio_attachments', 'image_attachments',
-        'habit_logs', 'routine_logs', 'todos', 'calendar_events', 'saved_articles', 'routines', 'habits',
+        'habit_logs', 'routine_logs', 'focus_sessions', 'interview_cards', 'interview_rounds', 'interview_topics', 'interview_applications', 'todos', 'calendar_events', 'saved_articles', 'routines', 'habits',
         'book_club_message_attachments', 'book_club_message_links', 'book_club_notifications',
         'book_club_meetings', 'book_club_messages', 'book_club_progress', 'book_club_books',
         'book_club_invites', 'book_club_members', 'book_clubs', 'items', 'projects', 'goals', 'life_areas',
@@ -1475,6 +1567,7 @@ function decodeHtmlText(value) {
 registerApiRoutes(app, {
   planning: { db, now, validateArea, validateGoal, validateProject, ownedArea, ownedGoal, ownedProject },
   activity: { db, now, text, localToday, localTime, validDate },
+  interviews: { db, now, text, validDate },
   tasks: { db, now, validateTodo, nextDueDate, createUndoableDelete },
   notes: {
     db,

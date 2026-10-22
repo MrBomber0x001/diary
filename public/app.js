@@ -1,6 +1,6 @@
 const KIND_LABELS = { memo: 'مذكرة', book: 'كتاب', game: 'لعبة', movie: 'فيلم' };
 const KIND_ICONS = { memo: '✍️', book: '📚', game: '🎮', movie: '🎬' };
-const workspaceViews = new Set(['today', 'todos', 'calendar', 'planning', 'habits', 'library', 'articles', 'bookmarks', 'snippets', 'learning', 'finance', 'timeline', 'clubs', 'daily-notes', 'pinned', 'gallery']);
+const workspaceViews = new Set(['today', 'todos', 'calendar', 'planning', 'habits', 'library', 'articles', 'bookmarks', 'snippets', 'learning', 'finance', 'timeline', 'clubs', 'interviews', 'daily-notes', 'pinned', 'gallery']);
 const shortcutChoices = [
   ['', 'غير معين'],
   ['Ctrl+Alt+Shift+KeyA', 'Ctrl + Alt + Shift + A'],
@@ -62,6 +62,24 @@ let routines = [];
 let todayPlan = null;
 let weeklyReview = null;
 let metrics = null;
+let financeReminders = [];
+let interviewApplications = [];
+let interviewApplicationFilter = 'all';
+let interviewApplicationQuery = '';
+let interviewTopics = [];
+let activeInterviewTopicId = null;
+let interviewCardsPage = { cards: [], total: 0, page: 1, pageSize: 20, pageCount: 0 };
+let interviewCardQuery = '';
+let interviewCardSearchTimer = null;
+let interviewCardRequestId = 0;
+let interviewView = 'applications';
+let interviewQuiz = null;
+let focusProgress = { completed_sessions: 0, focus_minutes: 0, total_xp: 0, week_xp: 0 };
+let focusTimer = { mode: 'focus', focusMinutes: 25, breakMinutes: 5, remainingSeconds: 1500, running: false, starting: false, endsAt: null, activeSessionKey: null, activeSessionMinutes: null, activeTodoId: null, activeContextLabel: '', pendingSession: null };
+let focusAudioContext = null;
+let focusAudioSource = null;
+let focusAudioGain = null;
+let focusTimerInterval = null;
 let activeWorkspace = workspaceViews.has(requestedWorkspace) ? requestedWorkspace : 'today';
 let todoFilter = 'all';
 let articleFilter = 'all';
@@ -105,6 +123,7 @@ let prayerTimesRequest = null;
 let prayerTimesRefreshTimer = null;
 let financeData = null;
 let financeLoadVersion = 0;
+let financeTransactionFilter = 'all';
 let quranSurahsRequest = null;
 let quranRadiosLoaded = false;
 const formatLocale = () => language === 'en' ? 'en-US' : 'ar-EG';
@@ -121,7 +140,7 @@ let hasRenderedNotifications = false;
 let notificationAudioContext = null;
 let toastTimer;
 let globalSearchTimer;
-const notifiedTaskReminders = new Set();
+let notifiedTaskReminders = new Set();
 const notifiedOverdueTodos = new Set();
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -394,12 +413,17 @@ function applyAutoDirection(root = document) {
 function showAuthentication(user, message = '') {
   const previousUserId = currentUser?.id;
   if (previousUserId && previousUserId !== user?.id) {
+    stopFocusAmbience();
     prayerTimesRequest?.abort();
     prayerTimesRequest = null;
     prayerLocation = { latitude: null, longitude: null, label: '', method: 5 };
     prayerTimesData = null;
     prayerTimesLoadedKey = '';
     financeData = null;
+    financeReminders = [];
+    focusProgress = { completed_sessions: 0, focus_minutes: 0, total_xp: 0, week_xp: 0 };
+    focusTimer = { mode: 'focus', focusMinutes: 25, breakMinutes: 5, remainingSeconds: 1500, running: false, starting: false, endsAt: null, activeSessionKey: null, activeSessionMinutes: null, activeTodoId: null, activeContextLabel: '', pendingSession: null };
+    notifiedTaskReminders.clear();
     financeLoadVersion += 1;
     if (prayerTimesRefreshTimer) clearInterval(prayerTimesRefreshTimer);
     prayerTimesRefreshTimer = null;
@@ -420,6 +444,9 @@ function showAuthentication(user, message = '') {
     pinnedEntries = [];
     noteIndex = [];
     galleryImages = [];
+    financeReminders = [];
+    focusTimer = { mode: 'focus', focusMinutes: 25, breakMinutes: 5, remainingSeconds: 1500, running: false, starting: false, endsAt: null, activeSessionKey: null, activeSessionMinutes: null, activeTodoId: null, activeContextLabel: '', pendingSession: null };
+    notifiedTaskReminders.clear();
     dailyNote = null;
     dailyNoteDirty = false;
     setWritingFocusMode(false);
@@ -427,8 +454,11 @@ function showAuthentication(user, message = '') {
     activeClubId = Number(localStorage.getItem(`personal-memo-active-club-${user.id}`)) || null;
     try {
       readNotificationKeys = new Set(JSON.parse(localStorage.getItem(`personal-memo-read-notifications-${user.id}`) || '[]'));
+      notifiedTaskReminders.clear();
+      notifiedTaskReminders = new Set(JSON.parse(localStorage.getItem(`personal-memo-browser-reminders-${user.id}`) || '[]'));
     } catch {
       readNotificationKeys = new Set();
+      notifiedTaskReminders.clear();
     }
   }
   document.getElementById('settingsButton').classList.toggle('hidden', !authenticated);
@@ -603,6 +633,8 @@ function financeMoney(amount, currency = financeData?.currency || 'EGP') {
 function renderFinance() {
   if (!financeData) return;
   const { summary, transactions, subscriptions, budgets, currency, month } = financeData;
+  document.getElementById('financePreviousMonth').textContent = language === 'en' ? '‹' : '›';
+  document.getElementById('financeNextMonth').textContent = language === 'en' ? '›' : '‹';
   const labels = language === 'en'
     ? ['Income', 'Expenses', 'Balance', 'Monthly subscriptions']
     : ['الدخل', 'المصروفات', 'الرصيد', 'الاشتراكات شهرياً'];
@@ -614,9 +646,42 @@ function renderFinance() {
     [labels[2], summary.balance, summary.balance < 0 ? 'expense' : 'income'],
     [labels[3], summary.monthlySubscriptions, 'subscription'],
   ].map(([label, amount, kind]) => `<article class="finance-summary-card"><span>${label}</span><strong class="is-${kind}">${financeMoney(amount, currency)}</strong></article>`).join('');
-  const transactionEmpty = language === 'en' ? 'No transactions for this month yet.' : 'لا توجد عمليات مسجلة لهذا الشهر بعد.';
-  document.getElementById('financeTransactionList').innerHTML = transactions.length
-    ? transactions.map(transaction => `<article class="finance-transaction">
+  const totalFlow = summary.income + summary.expenses;
+  const incomePercent = totalFlow ? summary.income / totalFlow * 100 : 0;
+  const expensePercent = totalFlow ? summary.expenses / totalFlow * 100 : 0;
+  document.getElementById('financeIncomeBar').style.width = `${incomePercent}%`;
+  document.getElementById('financeExpenseBar').style.width = `${expensePercent}%`;
+  document.getElementById('financeCashflowBalance').textContent = financeMoney(summary.balance, currency);
+  document.getElementById('financeCashflowBalance').className = summary.balance < 0 ? 'is-negative' : 'is-positive';
+  document.getElementById('financeIncomeLegend').textContent = financeMoney(summary.income, currency);
+  document.getElementById('financeExpenseLegend').textContent = financeMoney(summary.expenses, currency);
+  document.getElementById('financeCashflowCaption').textContent = language === 'en'
+    ? 'Income compared with spending this month'
+    : 'مقارنة الدخل بالمصروفات خلال هذا الشهر';
+  const expenseCategories = transactions.filter(transaction => transaction.type === 'expense')
+    .reduce((groups, transaction) => {
+      groups.set(transaction.category, (groups.get(transaction.category) || 0) + transaction.amount);
+      return groups;
+    }, new Map());
+  const categoryTotals = [...expenseCategories.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const largestCategory = categoryTotals[0]?.[1] || 0;
+  document.getElementById('financeCategoryBreakdown').innerHTML = categoryTotals.length
+    ? categoryTotals.map(([category, amount]) => `<div class="finance-category-row">
+        <div class="finance-category-heading"><strong>${escapeHtml(category)}</strong><span>${financeMoney(amount, currency)}</span></div>
+        <div class="finance-category-track" aria-hidden="true"><span style="width:${Math.max(3, amount / largestCategory * 100)}%"></span></div>
+      </div>`).join('')
+    : `<p class="finance-empty">${language === 'en' ? 'Add expenses to see your top spending categories.' : 'أضف مصروفاتك لعرض أكثر التصنيفات إنفاقاً.'}</p>`;
+  const transactionQuery = document.getElementById('financeSearch').value.trim().toLocaleLowerCase();
+  const visibleTransactions = transactions.filter(transaction =>
+    (financeTransactionFilter === 'all' || transaction.type === financeTransactionFilter)
+    && (!transactionQuery || [transaction.description, transaction.category, transaction.notes]
+      .some(value => value.toLocaleLowerCase().includes(transactionQuery))));
+  document.getElementById('financeTransactionCount').textContent = language === 'en'
+    ? `${visibleTransactions.length} / ${transactions.length}` : `${arabicNumber(visibleTransactions.length)} / ${arabicNumber(transactions.length)}`;
+  const transactionEmpty = language === 'en' ? 'No transactions match these filters.' : 'لا توجد عمليات تطابق عوامل التصفية.';
+  document.getElementById('financeTransactionList').innerHTML = visibleTransactions.length
+    ? visibleTransactions.map(transaction => `<article class="finance-transaction">
+        <span class="finance-transaction-type is-${transaction.type}" aria-hidden="true">${transaction.type === 'income' ? '+' : '−'}</span>
         <div class="finance-transaction-copy"><strong>${escapeHtml(transaction.description)}</strong><span>${escapeHtml(transaction.category)} · ${formatDate(transaction.transaction_date)}</span></div>
         <strong class="finance-amount is-${transaction.type}">${transaction.type === 'income' ? '+' : '−'}${financeMoney(transaction.amount, currency)}</strong>
         <div class="finance-item-actions">
@@ -625,25 +690,41 @@ function renderFinance() {
         </div>
       </article>`).join('')
     : `<p class="finance-empty">${transactionEmpty}</p>`;
+  document.querySelectorAll('[data-finance-filter]').forEach(button => {
+    button.classList.toggle('is-active', button.dataset.financeFilter === financeTransactionFilter);
+  });
   const budgetEmpty = language === 'en' ? 'No budgets for this month.' : 'لم تضف ميزانيات لهذا الشهر.';
   document.getElementById('financeBudgetList').innerHTML = budgets.length
     ? budgets.map(budget => {
       const percent = Math.min(100, Math.round(budget.spent / budget.amount * 100));
+      const remaining = budget.amount - budget.spent;
+      const budgetStatus = remaining < 0
+        ? (language === 'en' ? `${financeMoney(Math.abs(remaining), currency)} over budget` : `تجاوزت الميزانية بـ ${financeMoney(Math.abs(remaining), currency)}`)
+        : (language === 'en' ? `${financeMoney(remaining, currency)} remaining` : `متبقٍ ${financeMoney(remaining, currency)}`);
       return `<article class="finance-budget"><div><strong>${escapeHtml(budget.category)}</strong><span>${financeMoney(budget.spent, currency)} / ${financeMoney(budget.amount, currency)}</span></div>
-        <div class="finance-budget-track" role="progressbar" aria-label="${escapeHtml(budget.category)}" aria-valuemin="0" aria-valuemax="${budget.amount}" aria-valuenow="${budget.spent}"><span class="${budget.spent > budget.amount ? 'is-over' : ''}" style="width:${percent}%"></span></div>
-        <button class="finance-text-action" type="button" data-finance-delete-budget="${budget.id}">${language === 'en' ? 'Remove budget' : 'حذف الميزانية'}</button></article>`;
+        <div class="finance-budget-track" role="progressbar" aria-label="${escapeHtml(budget.category)}" aria-valuemin="0" aria-valuemax="${budget.amount}" aria-valuenow="${Math.min(budget.spent, budget.amount)}" aria-valuetext="${escapeHtml(budgetStatus)}"><span class="${budget.spent > budget.amount ? 'is-over' : ''}" style="width:${percent}%"></span></div>
+        <div class="finance-budget-footer"><span class="${remaining < 0 ? 'is-over' : ''}">${budgetStatus}</span><button class="finance-text-action" type="button" data-finance-delete-budget="${budget.id}">${language === 'en' ? 'Remove' : 'حذف'}</button></div></article>`;
     }).join('')
     : `<p class="finance-empty">${budgetEmpty}</p>`;
   const subscriptionEmpty = language === 'en' ? 'No subscriptions saved yet.' : 'لا توجد اشتراكات محفوظة بعد.';
   document.getElementById('financeSubscriptionList').innerHTML = subscriptions.length
-    ? subscriptions.map(subscription => `<article class="finance-subscription${subscription.status === 'active' ? '' : ' is-inactive'}">
+    ? subscriptions.map(subscription => {
+      const daysUntilRenewal = Math.round((new Date(`${subscription.next_renewal_date}T00:00:00Z`) - new Date(`${localToday()}T00:00:00Z`)) / 86400000);
+      const renewalStatus = subscription.status !== 'active'
+        ? (language === 'en' ? subscription.status : subscription.status === 'paused' ? 'متوقف' : 'ملغى')
+        : daysUntilRenewal < 0 ? (language === 'en' ? 'Overdue' : 'متأخر')
+          : daysUntilRenewal <= 7 ? (language === 'en' ? 'Due soon' : 'قريباً') : '';
+      return `<article class="finance-subscription${subscription.status === 'active' ? '' : ' is-inactive'}">
+        <span class="finance-subscription-icon" aria-hidden="true">↻</span>
         <div class="finance-transaction-copy"><strong>${escapeHtml(subscription.name)}</strong><span>${financeMoney(subscription.amount, subscription.currency)} · ${subscription.billing_cycle === 'monthly' ? (language === 'en' ? 'monthly' : 'شهري') : (language === 'en' ? 'yearly' : 'سنوي')} · ${language === 'en' ? 'Next' : 'التالي'} ${formatDate(subscription.next_renewal_date)}</span></div>
         <div class="finance-item-actions">
+          ${renewalStatus ? `<span class="finance-renewal-status${subscription.status === 'active' && daysUntilRenewal < 0 ? ' is-overdue' : ''}">${renewalStatus}</span>` : ''}
           ${subscription.status === 'active' ? `<button class="small-button" type="button" data-finance-pay-subscription="${subscription.id}">${language === 'en' ? 'Mark paid' : 'تسجيل الدفع'}</button>` : ''}
           <button class="icon-action" type="button" data-finance-edit-subscription="${subscription.id}" aria-label="${language === 'en' ? 'Edit subscription' : 'تعديل الاشتراك'}">${actionIcon('edit')}</button>
           <button class="icon-action is-danger" type="button" data-finance-delete-subscription="${subscription.id}" aria-label="${language === 'en' ? 'Delete subscription' : 'حذف الاشتراك'}">${actionIcon('delete')}</button>
         </div>
-      </article>`).join('')
+      </article>`;
+    }).join('')
     : `<p class="finance-empty">${subscriptionEmpty}</p>`;
 }
 
@@ -769,6 +850,12 @@ function setQuranSurahAudio() {
   audio.src = `https://cdn.islamic.network/quran/audio-surah/128/${encodeURIComponent(reciter)}/${encodeURIComponent(surah)}.mp3`;
   audio.load();
   document.getElementById('quranPlayerStatus').textContent = language === 'en' ? 'Surah ready. Press play to listen.' : 'السورة جاهزة. اضغط تشغيل للاستماع.';
+}
+
+function setQuranPlaybackState(isPlaying) {
+  const toggle = document.getElementById('quranPlayerToggle');
+  toggle.classList.toggle('is-playing', isPlaying);
+  toggle.setAttribute('aria-pressed', String(isPlaying));
 }
 
 async function loadQuranRadios() {
@@ -1304,9 +1391,37 @@ function renderWeeklyReview() {
     ${weeklyReview.projectsNeedingAttention.length ? `<p class="weekly-review-prompt"><strong>مشاريع قد تحتاج خطوة صغيرة:</strong> ${weeklyReview.projectsNeedingAttention.map(project => escapeHtml(project.title)).join('، ')}</p>` : '<p class="weekly-review-prompt">لا توجد مشاريع نشطة متوقفة عن التحديث هذا الأسبوع. خذ لحظة لتحديد خطوتك القادمة.</p>'}`;
 }
 
+function markBrowserReminderNotified(key) {
+  notifiedTaskReminders.add(key);
+  if (currentUser) {
+    notifiedTaskReminders = new Set([...notifiedTaskReminders].slice(-200));
+    localStorage.setItem(`personal-memo-browser-reminders-${currentUser.id}`, JSON.stringify([...notifiedTaskReminders]));
+  }
+}
+
 function checkTaskReminders() {
   if (!notificationsEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
   const nowTime = Date.now();
+  financeReminders.forEach(subscription => {
+    const daysUntil = daysBetweenLocalDates(localToday(), subscription.next_renewal_date);
+    if (daysUntil > 3 || (daysUntil > 0 && daysUntil < 3)) return;
+    const key = `${currentUser?.id}:subscription:${subscription.id}:${subscription.next_renewal_date}`;
+    if (notifiedTaskReminders.has(key)) return;
+    markBrowserReminderNotified(key);
+    const notification = new Notification(language === 'en' ? 'Subscription renewal' : 'تجديد اشتراك', {
+      body: daysUntil < 0
+        ? `${subscription.name} · ${language === 'en' ? 'renewal overdue' : 'تاريخ التجديد متأخر'}`
+        : daysUntil === 0
+          ? `${subscription.name} · ${language === 'en' ? 'renews today' : 'يتجدد اليوم'}`
+          : `${subscription.name} · ${language === 'en' ? `renews in ${daysUntil} days` : `يتجدد بعد ${arabicNumber(daysUntil)} أيام`}`,
+      tag: `personal-memo-subscription-${subscription.id}-${subscription.next_renewal_date}`,
+    });
+    notification.onclick = () => {
+      window.focus();
+      setWorkspaceView('finance', true);
+      notification.close();
+    };
+  });
   todos.filter(todo => !todo.completed && todo.due_date).forEach(todo => {
     const dueDate = new Date(`${todo.due_date}T${todo.due_time || '23:59'}:00`);
     const overdue = dueDate.getTime() <= nowTime;
@@ -1314,7 +1429,7 @@ function checkTaskReminders() {
     if (!overdue && !dueSoon) return;
     const key = `${currentUser?.id}:todo:${todo.id}:${todo.due_date}:${todo.due_time || ''}`;
     if (notifiedTaskReminders.has(key)) return;
-    notifiedTaskReminders.add(key);
+    markBrowserReminderNotified(key);
     const notification = new Notification(overdue ? 'مهمة متأخرة' : 'تذكير بمهمة قريبة', {
       body: overdue ? todo.title : `باقي أقل من ${arabicNumber(reminderMinutes)} دقيقة: ${todo.title}`,
       tag: `personal-memo-todo-${todo.id}`,
@@ -1331,7 +1446,7 @@ function checkTaskReminders() {
     if (minutesUntil < 0 || minutesUntil > reminderMinutes) return;
     const key = `${currentUser?.id}:event:${event.id}:${event.occurrence_date}`;
     if (notifiedTaskReminders.has(key)) return;
-    notifiedTaskReminders.add(key);
+    markBrowserReminderNotified(key);
     const notification = new Notification('موعد قريب', {
       body: `بعد أقل من ${arabicNumber(reminderMinutes)} دقيقة: ${event.title}`,
       tag: `personal-memo-event-${event.id}-${event.occurrence_date}`,
@@ -1342,6 +1457,689 @@ function checkTaskReminders() {
       notification.close();
     };
   });
+  const unfinishedHabits = habits.filter(habit => !habit.completed_today
+    && (habit.frequency === 'daily' || habit.completed_this_week < habit.target_per_week));
+  const unfinishedRoutines = routines.filter(routine => !routine.completed_today);
+  const dailyNudgeKey = `${currentUser?.id}:daily-habits:${localToday()}`;
+  if (unfinishedHabits.length + unfinishedRoutines.length && new Date().getHours() >= 9 && new Date().getHours() < 21
+    && !notifiedTaskReminders.has(dailyNudgeKey)) {
+    markBrowserReminderNotified(dailyNudgeKey);
+    const notification = new Notification(language === 'en' ? 'A gentle daily nudge' : 'تذكير لطيف بعاداتك', {
+      body: language === 'en'
+        ? `${unfinishedHabits.length + unfinishedRoutines.length} habits or routines are still waiting for you.`
+        : `لديك ${arabicNumber(unfinishedHabits.length + unfinishedRoutines.length)} من العادات أو الروتينات بانتظارك.`,
+      tag: `personal-memo-daily-habits-${localToday()}`,
+    });
+    notification.onclick = () => {
+      window.focus();
+      setWorkspaceView('habits', true);
+      notification.close();
+    };
+  }
+}
+
+function daysBetweenLocalDates(fromDate, toDate) {
+  const [fromYear, fromMonth, fromDay] = fromDate.split('-').map(Number);
+  const [toYear, toMonth, toDay] = toDate.split('-').map(Number);
+  return Math.round((Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86400000);
+}
+
+function focusTimerStorageKey() {
+  return `personal-memo-focus-timer-${currentUser?.id}`;
+}
+
+function createFocusSessionKey() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return [...crypto.getRandomValues(new Uint8Array(16))]
+    .map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function persistFocusTimer() {
+  if (currentUser) localStorage.setItem(focusTimerStorageKey(), JSON.stringify(focusTimer));
+}
+
+function initializeFocusTimer(settings) {
+  focusTimer.focusMinutes = settings.focusDurationMinutes || 25;
+  focusTimer.breakMinutes = settings.focusBreakMinutes || 5;
+  focusTimer.mode = 'focus';
+  focusTimer.remainingSeconds = focusTimer.focusMinutes * 60;
+  focusTimer.running = false;
+  focusTimer.starting = false;
+  focusTimer.endsAt = null;
+  focusTimer.activeSessionKey = null;
+  focusTimer.activeSessionMinutes = null;
+  focusTimer.activeTodoId = null;
+  focusTimer.activeContextLabel = '';
+  focusTimer.pendingSession = null;
+  if (currentUser) {
+    try {
+      const audioSettings = JSON.parse(localStorage.getItem(`personal-memo-focus-audio-${currentUser.id}`) || '{}');
+      document.getElementById('focusAmbienceSelect').value = ['off', 'white', 'rain', 'sea', 'wind'].includes(audioSettings.sound)
+        ? audioSettings.sound : 'off';
+      document.getElementById('focusAmbienceVolume').value = Number.isInteger(audioSettings.volume)
+        ? Math.max(0, Math.min(100, audioSettings.volume)) : 28;
+      const saved = JSON.parse(localStorage.getItem(focusTimerStorageKey()) || 'null');
+      if (saved && ['focus', 'break'].includes(saved.mode)
+        && Number.isInteger(saved.remainingSeconds) && saved.remainingSeconds >= 0
+        && typeof saved.running === 'boolean') {
+        const hasActiveFocusSession = typeof saved.activeSessionKey === 'string'
+          && Number.isInteger(saved.activeSessionMinutes) && saved.activeSessionMinutes >= 1 && saved.activeSessionMinutes <= 180;
+        focusTimer.mode = saved.mode;
+        focusTimer.remainingSeconds = saved.remainingSeconds;
+        focusTimer.running = saved.running && Number.isFinite(saved.endsAt) && (saved.mode === 'break' || hasActiveFocusSession);
+        focusTimer.endsAt = focusTimer.running ? saved.endsAt : null;
+        focusTimer.activeSessionKey = hasActiveFocusSession ? saved.activeSessionKey : null;
+        focusTimer.activeSessionMinutes = hasActiveFocusSession ? saved.activeSessionMinutes : null;
+        focusTimer.activeTodoId = Number.isInteger(saved.activeTodoId) && saved.activeTodoId > 0 ? saved.activeTodoId : null;
+        focusTimer.activeContextLabel = typeof saved.activeContextLabel === 'string' ? saved.activeContextLabel : '';
+        focusTimer.pendingSession = saved.pendingSession && typeof saved.pendingSession.session_key === 'string'
+          ? saved.pendingSession : null;
+      }
+    } catch {
+      localStorage.removeItem(focusTimerStorageKey());
+    }
+  }
+  if (!focusTimerInterval) focusTimerInterval = setInterval(tickFocusTimer, 1000);
+  renderFocusTimer();
+  if (focusTimer.pendingSession) submitCompletedFocusSession().catch(error => showToast(error.message));
+  if (focusTimer.running) tickFocusTimer();
+}
+
+function renderFocusTimer() {
+  const clock = document.getElementById('focusTimerClock');
+  if (!clock) return;
+  const seconds = Math.max(0, focusTimer.running && focusTimer.endsAt
+    ? Math.ceil((focusTimer.endsAt - Date.now()) / 1000)
+    : focusTimer.remainingSeconds);
+  clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+  clock.dir = 'ltr';
+  document.getElementById('focusTimerMode').textContent = language === 'en'
+    ? focusTimer.mode === 'focus' ? 'Focus' : 'Short break'
+    : focusTimer.mode === 'focus' ? 'تركيز' : 'استراحة قصيرة';
+  document.getElementById('focusTimerStart').disabled = focusTimer.running || focusTimer.starting;
+  document.getElementById('focusTimerPause').disabled = !focusTimer.running || focusTimer.starting;
+  document.getElementById('focusAmbienceToggle').setAttribute('aria-pressed', String(Boolean(focusAudioSource)));
+  document.getElementById('focusTimerSync').classList.toggle('hidden', !focusTimer.pendingSession);
+  const timerLocked = focusTimer.running || focusTimer.starting || Boolean(focusTimer.activeSessionKey);
+  document.getElementById('focusTodoSelect').disabled = timerLocked;
+  document.getElementById('focusContextInput').disabled = timerLocked;
+  document.getElementById('focusDurationInput').disabled = timerLocked;
+  document.getElementById('focusBreakInput').disabled = timerLocked;
+  document.getElementById('saveFocusSettings').disabled = timerLocked;
+  if (document.activeElement !== document.getElementById('focusDurationInput')) {
+    document.getElementById('focusDurationInput').value = focusTimer.focusMinutes;
+  }
+  if (document.activeElement !== document.getElementById('focusBreakInput')) {
+    document.getElementById('focusBreakInput').value = focusTimer.breakMinutes;
+  }
+  if (document.activeElement !== document.getElementById('focusTodoSelect')) {
+    document.getElementById('focusTodoSelect').value = focusTimer.activeTodoId || '';
+  }
+  if (document.activeElement !== document.getElementById('focusContextInput')) {
+    document.getElementById('focusContextInput').value = focusTimer.activeContextLabel || '';
+  }
+  document.getElementById('focusTotalXp').textContent = arabicNumber(focusProgress.total_xp || 0);
+  document.getElementById('focusSessionsCount').textContent = arabicNumber(focusProgress.completed_sessions || 0);
+  document.getElementById('focusWeekXp').textContent = arabicNumber(focusProgress.week_xp || 0);
+  renderFocusSessionHistory();
+}
+
+function renderFocusTodoOptions() {
+  const select = document.getElementById('focusTodoSelect');
+  if (!select) return;
+  const selectedTodoId = focusTimer.activeTodoId || select.value;
+  select.innerHTML = `<option value="">${language === 'en' ? 'General focus session' : 'جلسة عامة'}</option>${todos
+    .filter(todo => !todo.completed)
+    .map(todo => `<option value="${todo.id}">${escapeHtml(todo.title)}</option>`).join('')}`;
+  if (selectedTodoId && todos.some(todo => String(todo.id) === String(selectedTodoId))) {
+    select.value = String(selectedTodoId);
+  } else if (!focusTimer.activeSessionKey) {
+    select.value = '';
+    focusTimer.activeTodoId = null;
+  }
+}
+
+function renderFocusSessionHistory() {
+  const list = document.getElementById('focusSessionHistory');
+  const sessions = focusProgress.sessions || [];
+  list.innerHTML = sessions.length ? `<h4>${language === 'en' ? 'Recent focus sessions' : 'جلسات التركيز الأخيرة'}</h4>
+    <div class="focus-session-list">${sessions.slice(0, 5).map(session => {
+      const association = session.todo_title || session.context_label;
+      const dateLabel = session.completed_at ? formatDate(session.completed_at.slice(0, 10)) : '';
+      return `<article class="focus-session-row"><span><strong>${arabicNumber(session.focus_minutes)} ${language === 'en' ? 'min' : 'دقيقة'}</strong>
+        <small>${escapeHtml(association || (language === 'en' ? 'General session' : 'جلسة عامة'))}${dateLabel ? ` · ${escapeHtml(dateLabel)}` : ''}</small></span>
+        <b>+${arabicNumber(session.xp_earned)} XP</b></article>`;
+    }).join('')}</div>` : '';
+}
+
+const interviewStatusLabels = {
+  applied: ['تم التقديم', 'Applied'],
+  screening: ['مراجعة أولية', 'Screening'],
+  interviewing: ['مقابلات', 'Interviewing'],
+  offer: ['عرض وظيفي', 'Offer'],
+  rejected: ['اعتذار', 'Rejected'],
+  withdrawn: ['انسحاب', 'Withdrawn'],
+};
+
+function openInterviewApplicationForm(application = null) {
+  const form = document.getElementById('interviewApplicationForm');
+  form.reset();
+  form.elements.id.value = application?.id || '';
+  form.elements.company.value = application?.company || '';
+  form.elements.role.value = application?.role || '';
+  form.elements.status.value = application?.status || 'applied';
+  form.elements.job_url.value = application?.job_url || '';
+  form.elements.applied_on.value = application?.applied_on || '';
+  form.elements.notes.value = application?.notes || '';
+  document.getElementById('interviewApplicationDialogTitle').textContent = application
+    ? (language === 'en' ? 'Edit application' : 'تعديل طلب التوظيف')
+    : (language === 'en' ? 'Add job application' : 'إضافة طلب توظيف');
+  document.getElementById('interviewApplicationDialog').showModal();
+}
+
+function openInterviewRoundForm(applicationId, round = null) {
+  const form = document.getElementById('interviewRoundForm');
+  form.reset();
+  form.elements.applicationId.value = applicationId;
+  form.elements.roundId.value = round?.id || '';
+  form.elements.round_name.value = round?.round_name || '';
+  form.elements.occurred_on.value = round?.occurred_on || '';
+  form.elements.scheduled_start.value = round?.scheduled_start || '';
+  form.elements.scheduled_end.value = round?.scheduled_end || '';
+  form.elements.questions_answers.value = round?.questions_answers || '';
+  form.elements.questions_for_them.value = round?.questions_for_them || '';
+  form.elements.experience.value = round?.experience || '';
+  form.elements.follow_up.value = round?.follow_up || '';
+  document.getElementById('interviewRoundDialogTitle').textContent = round
+    ? (language === 'en' ? 'Edit interview notes' : 'تعديل ملاحظات المقابلة')
+    : (language === 'en' ? 'Add interview notes' : 'إضافة ملاحظات مقابلة');
+  document.getElementById('interviewRoundDialog').showModal();
+}
+
+function renderInterviewOverview() {
+  const overview = document.getElementById('interviewOverview');
+  if (!overview) return;
+  const applicationCount = interviewApplications.length;
+  const roundCount = interviewApplications.reduce((sum, application) => sum + (application.rounds || []).length, 0);
+  const topicCount = interviewTopics.length;
+  const cardCount = interviewTopics.reduce((sum, topic) => sum + Number(topic.card_count || 0), 0);
+  overview.innerHTML = `
+    <div class="interview-overview-card">
+      <strong>${arabicNumber(applicationCount)}</strong>
+      <span>${language === 'en' ? 'Applications' : 'طلبات التوظيف'}</span>
+    </div>
+    <div class="interview-overview-card">
+      <strong>${arabicNumber(roundCount)}</strong>
+      <span>${language === 'en' ? 'Interview logs' : 'سجلات المقابلات'}</span>
+    </div>
+    <div class="interview-overview-card">
+      <strong>${arabicNumber(topicCount)}</strong>
+      <span>${language === 'en' ? 'Topics' : 'المواضيع'}</span>
+    </div>
+    <div class="interview-overview-card">
+      <strong>${arabicNumber(cardCount)}</strong>
+      <span>${language === 'en' ? 'Flashcards' : 'البطاقات'}</span>
+    </div>`;
+}
+
+function renderInterviewApplications() {
+  renderInterviewOverview();
+  const list = document.getElementById('interviewApplicationList');
+  const resultCount = document.getElementById('interviewApplicationResultCount');
+  const searchInput = document.getElementById('interviewApplicationSearch');
+  const filterSelect = document.getElementById('interviewApplicationFilter');
+  if (searchInput && searchInput.value !== interviewApplicationQuery) searchInput.value = interviewApplicationQuery;
+  if (filterSelect) filterSelect.value = interviewApplicationFilter;
+  if (!interviewApplications.length) {
+    if (resultCount) resultCount.textContent = '';
+    list.innerHTML = `<div class="empty"><strong>${language === 'en' ? 'No applications tracked yet' : 'لم تسجل طلبات توظيف بعد'}</strong>
+      ${language === 'en' ? 'Keep the role, interview questions, your answers, and what you learned together.' : 'اجمع معلومات الوظيفة وأسئلة المقابلة وإجاباتك وما تعلمته في مكان واحد.'}
+      <p><button class="small-button" type="button" data-interview-empty-add>${language === 'en' ? '＋ Add an application' : '＋ إضافة طلب توظيف'}</button></p></div>`;
+    return;
+  }
+  const normalizedQuery = interviewApplicationQuery.toLocaleLowerCase();
+  const filteredApplications = interviewApplications.filter(application => {
+    const matchesFilter = interviewApplicationFilter === 'all'
+      || (interviewApplicationFilter === 'active' && ['applied', 'screening', 'interviewing'].includes(application.status))
+      || (interviewApplicationFilter === 'interviewing' && application.status === 'interviewing')
+      || (interviewApplicationFilter === 'offer' && application.status === 'offer')
+      || (interviewApplicationFilter === 'closed' && ['rejected', 'withdrawn'].includes(application.status));
+    const searchable = `${application.company} ${application.role} ${application.notes}`.toLocaleLowerCase();
+    return matchesFilter && (!normalizedQuery || searchable.includes(normalizedQuery));
+  });
+  if (resultCount) {
+    resultCount.textContent = language === 'en'
+      ? `${arabicNumber(filteredApplications.length)} of ${arabicNumber(interviewApplications.length)} applications`
+      : `${arabicNumber(filteredApplications.length)} / ${arabicNumber(interviewApplications.length)} طلبات`;
+  }
+  if (!filteredApplications.length) {
+    list.innerHTML = `<div class="interview-application-empty"><strong>${language === 'en' ? 'No matching applications' : 'لا توجد طلبات مطابقة'}</strong>
+      <span>${language === 'en' ? 'Try another search or status filter.' : 'جرّب بحثاً أو حالة أخرى.'}</span></div>`;
+    return;
+  }
+  list.innerHTML = filteredApplications.map(application => {
+    const [statusArabic, statusEnglish] = interviewStatusLabels[application.status] || interviewStatusLabels.applied;
+    const status = language === 'en' ? statusEnglish : statusArabic;
+    const initials = application.company.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase();
+    const stages = [
+      ['applied', language === 'en' ? 'Applied' : 'تم التقديم'],
+      ['screening', language === 'en' ? 'Screening' : 'مراجعة أولية'],
+      ['interviewing', language === 'en' ? 'Interviewing' : 'مقابلات'],
+      ['offer', language === 'en' ? 'Offer' : 'عرض وظيفي'],
+    ];
+    const currentStage = stages.findIndex(([key]) => key === application.status);
+    const isClosed = ['rejected', 'withdrawn'].includes(application.status);
+    return `<article class="interview-application-card" data-interview-application="${application.id}">
+      <header class="interview-application-heading">
+        <div class="interview-application-identity">
+          <span class="interview-company-mark" aria-hidden="true">${escapeHtml(initials || '•')}</span>
+          <div class="interview-application-title">
+            <div class="interview-application-title-line"><h3 dir="auto">${escapeHtml(application.company)}</h3><span class="interview-status interview-status-${application.status}">${escapeHtml(status)}</span></div>
+            <p dir="auto">${escapeHtml(application.role)}</p>
+          </div>
+        </div>
+        <div class="interview-application-actions">
+          ${application.job_url ? `<a class="small-button" href="${escapeHtml(application.job_url)}" target="_blank" rel="noopener noreferrer">${language === 'en' ? 'Job post ↗' : 'إعلان الوظيفة ↗'}</a>` : ''}
+          <button class="small-button" type="button" data-interview-edit-application="${application.id}">${language === 'en' ? 'Edit' : 'تعديل'}</button>
+          ${iconButton('delete', language === 'en' ? 'Delete application' : 'حذف طلب التوظيف', `data-interview-delete-application="${application.id}"`)}
+        </div>
+      </header>
+      <div class="interview-application-meta">
+        ${application.applied_on ? `<span class="interview-meta-item"><span aria-hidden="true">◷</span>${language === 'en' ? 'Applied' : 'تاريخ التقديم'} · ${escapeHtml(formatDate(application.applied_on))}</span>` : ''}
+        <span class="interview-meta-item"><span aria-hidden="true">▤</span>${arabicNumber((application.rounds || []).length)} ${language === 'en' ? 'interviews logged' : 'مقابلات مسجلة'}</span>
+      </div>
+      ${!isClosed ? `<div class="interview-application-stage" aria-label="${language === 'en' ? 'Application progress' : 'تقدم الطلب'}">${stages.map(([key, label], index) => `<span class="interview-stage${index < currentStage ? ' is-complete' : ''}${index === currentStage ? ' is-current' : ''}"><i aria-hidden="true">${index < currentStage ? '✓' : ''}</i><small>${label}</small></span>`).join('')}</div>` : ''}
+      ${application.notes ? `<details class="interview-application-notes"><summary>${language === 'en' ? 'Application notes' : 'ملاحظات الطلب'}</summary><p>${escapeHtml(application.notes)}</p></details>` : ''}
+      <div class="interview-rounds-heading"><div><h4>${language === 'en' ? 'Interview activity' : 'نشاط المقابلات'}</h4><p>${(application.rounds || []).length ? (language === 'en' ? 'Your rounds, questions, and takeaways' : 'جولاتك وأسئلتك وما تعلمته') : (language === 'en' ? 'Keep notes from each round here' : 'احتفظ بملاحظات كل جولة هنا')}</p></div>
+        <button class="small-button" type="button" data-interview-add-round="${application.id}">＋ ${language === 'en' ? 'Log interview' : 'سجّل مقابلة'}</button></div>
+      ${(application.rounds || []).length ? (application.rounds || []).map(round => `<details class="interview-round">
+        <summary><span><strong dir="auto">${escapeHtml(round.round_name)}</strong>${round.scheduled_start
+          ? (round.calendar_event_id
+            ? `<a class="interview-calendar-link" href="#calendar" data-interview-calendar-date="${escapeHtml(round.scheduled_start.slice(0, 10))}">◷ ${language === 'en' ? 'View in calendar' : 'عرض في التقويم'} · ${escapeHtml(new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(round.scheduled_start)))}</a>`
+            : `<small>${escapeHtml(new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(round.scheduled_start)))}</small>`)
+          : (round.occurred_on ? `<small>${escapeHtml(formatDate(round.occurred_on))}</small>` : '')}</span>
+          <span class="interview-round-summary-actions"><button type="button" data-interview-edit-round="${round.id}" data-interview-parent="${application.id}">${language === 'en' ? 'Edit' : 'تعديل'}</button>
+          ${iconButton('delete', language === 'en' ? 'Delete interview notes' : 'حذف ملاحظات المقابلة', `data-interview-delete-round="${round.id}" data-interview-parent="${application.id}"`)}</span></summary>
+        <div class="interview-round-content">
+          ${round.questions_answers ? `<section><h5>${language === 'en' ? 'Questions and my answers' : 'الأسئلة وإجاباتي'}</h5><p>${escapeHtml(round.questions_answers)}</p></section>` : ''}
+          ${round.questions_for_them ? `<section><h5>${language === 'en' ? 'Questions I asked' : 'أسئلتي للمقابِل'}</h5><p>${escapeHtml(round.questions_for_them)}</p></section>` : ''}
+          ${round.experience ? `<section><h5>${language === 'en' ? 'Experience and lessons' : 'التجربة وما تعلمته'}</h5><p>${escapeHtml(round.experience)}</p></section>` : ''}
+          ${round.follow_up ? `<section><h5>${language === 'en' ? 'Next steps' : 'الخطوة التالية'}</h5><p>${escapeHtml(round.follow_up)}</p></section>` : ''}
+        </div></details>`).join('') : `<p class="interview-empty-rounds">${language === 'en' ? 'No interviews logged. Add notes after your first call.' : 'لم تسجل مقابلات بعد. أضف ملاحظاتك بعد أول مقابلة.'}</p>`}
+    </article>`;
+  }).join('');
+  applyAutoDirection(list);
+}
+
+function openInterviewTopicForm(topic = null) {
+  const form = document.getElementById('interviewTopicForm');
+  form.reset();
+  form.elements.id.value = topic?.id || '';
+  form.elements.title.value = topic?.title || '';
+  document.getElementById('interviewTopicDialogTitle').textContent = topic
+    ? (language === 'en' ? 'Edit mock topic' : 'تعديل موضوع التدريب')
+    : (language === 'en' ? 'New mock topic' : 'موضوع تدريب جديد');
+  document.getElementById('interviewTopicDialog').showModal();
+}
+
+function openInterviewCardForm(topicId, card = null) {
+  const form = document.getElementById('interviewCardForm');
+  form.reset();
+  form.elements.topicId.value = topicId;
+  form.elements.cardId.value = card?.id || '';
+  form.elements.question.value = card?.question || '';
+  form.elements.answer.value = card?.answer || '';
+  const topic = interviewTopics.find(item => item.id === Number(topicId));
+  document.getElementById('interviewCardTopicLabel').textContent = topic?.title || (language === 'en' ? 'Mock interview card' : 'بطاقة تدريب');
+  document.getElementById('interviewCardDialogTitle').textContent = card
+    ? (language === 'en' ? 'Edit flashcard' : 'تعديل البطاقة')
+    : (language === 'en' ? 'New flashcard' : 'بطاقة جديدة');
+  document.getElementById('interviewCardDialog').showModal();
+}
+
+function setInterviewView(view) {
+  interviewView = view;
+  const tabs = Array.from(document.querySelectorAll('.interview-tab'));
+  tabs.forEach(tab => {
+    const active = tab.dataset.interviewView === view;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  const applicationsPanel = document.getElementById('interviewApplicationsPanel');
+  const practicePanel = document.getElementById('interviewPracticePanel');
+  applicationsPanel.classList.toggle('hidden', view !== 'applications');
+  practicePanel.classList.toggle('hidden', view !== 'practice');
+}
+
+function renderInterviewPractice() {
+  renderInterviewOverview();
+  const tabs = document.querySelectorAll('.interview-tab');
+  if (tabs.length) setInterviewView(interviewView);
+  const workspace = document.getElementById('interviewPracticeWorkspace');
+  if (!workspace) return;
+  if (!interviewTopics.length) {
+    workspace.innerHTML = `<div class="empty"><strong>${language === 'en' ? 'No mock interview topics yet' : 'لا توجد مواضيع تدريب بعد'}</strong>
+      ${language === 'en' ? 'Create a topic such as System Design, Databases, or Behavior. Then add cards for questions and answers.' : 'أنشئ موضوعاً مثل تصميم الأنظمة أو قواعد البيانات أو المقابلات السلوكية، ثم أضف بطاقات السؤال والإجابة.'}
+      <p><button class="small-button" type="button" data-topic-empty-add>${language === 'en' ? '＋ Add a topic' : '＋ إضافة موضوع'}</button></p></div>`;
+    return;
+  }
+  if (!interviewTopics.some(topic => topic.id === activeInterviewTopicId)) {
+    activeInterviewTopicId = interviewTopics[0].id;
+    interviewCardQuery = '';
+    interviewCardsPage = { cards: [], total: 0, page: 1, pageSize: 20, pageCount: 0 };
+  }
+  const selectedTopic = interviewTopics.find(topic => topic.id === activeInterviewTopicId);
+  const cardsLabel = language === 'en' ? 'cards' : 'بطاقة';
+  workspace.innerHTML = `
+    <aside class="interview-topic-rail" aria-label="${language === 'en' ? 'Practice topics' : 'مواضيع التدريب'}">
+      <div class="interview-topic-rail-heading">
+        <span>${language === 'en' ? 'YOUR TOPICS' : 'مواضيعك'}</span>
+        <strong>${arabicNumber(interviewTopics.length)}</strong>
+      </div>
+      <div class="interview-topic-list">${interviewTopics.map(topic => `
+        <button class="interview-topic-select${topic.id === activeInterviewTopicId ? ' is-active' : ''}" type="button" data-topic-select="${topic.id}" aria-current="${topic.id === activeInterviewTopicId ? 'true' : 'false'}">
+          <span class="interview-topic-dot" aria-hidden="true">✦</span>
+          <span class="interview-topic-select-copy"><strong dir="auto">${escapeHtml(topic.title)}</strong><small>${arabicNumber(topic.card_count || 0)} ${cardsLabel}</small></span>
+        </button>`).join('')}</div>
+      <button class="interview-topic-create" type="button" data-topic-empty-add>＋ ${language === 'en' ? 'New topic' : 'موضوع جديد'}</button>
+    </aside>
+    <section class="interview-topic-detail" aria-label="${escapeHtml(selectedTopic.title)}">
+      <header class="interview-topic-detail-heading">
+        <div class="interview-topic-title">
+          <span class="interview-topic-kicker">${language === 'en' ? 'PRACTICE TOPIC' : 'موضوع تدريب'}</span>
+          <h4 dir="auto">${escapeHtml(selectedTopic.title)}</h4>
+          <p>${arabicNumber(selectedTopic.card_count || 0)} ${cardsLabel} · ${language === 'en' ? 'Search, review, or start a focused quiz.' : 'ابحث في بطاقاتك أو راجعها أو ابدأ اختباراً مركزاً.'}</p>
+        </div>
+        <div class="interview-topic-actions">
+          <button class="small-button" type="button" data-topic-edit="${selectedTopic.id}">${language === 'en' ? 'Rename' : 'إعادة تسمية'}</button>
+          <button class="small-button danger" type="button" data-topic-delete="${selectedTopic.id}">${language === 'en' ? 'Delete topic' : 'حذف الموضوع'}</button>
+        </div>
+      </header>
+      <div class="interview-card-toolbar">
+        <label class="interview-card-search">
+          <span aria-hidden="true">⌕</span>
+          <input type="search" data-card-search dir="auto" maxlength="200" value="${escapeHtml(interviewCardQuery)}" placeholder="${language === 'en' ? 'Search questions and answers' : 'ابحث في الأسئلة والإجابات'}" aria-label="${language === 'en' ? 'Search questions and answers' : 'ابحث في الأسئلة والإجابات'}">
+        </label>
+        <div class="interview-quiz-start-controls">
+          <label class="interview-quiz-count-label">${language === 'en' ? 'Quiz size' : 'عدد الأسئلة'}
+            <select data-quiz-count aria-label="${language === 'en' ? 'Number of quiz questions' : 'عدد أسئلة الاختبار'}">
+              <option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="all">${language === 'en' ? 'All' : 'الكل'}</option>
+            </select>
+          </label>
+          <button class="button button-primary" type="button" data-topic-quiz="${selectedTopic.id}">✧ ${language === 'en' ? 'Start quiz' : 'ابدأ الاختبار'}</button>
+        </div>
+        <button class="button button-quiet interview-add-card" type="button" data-topic-add-card="${selectedTopic.id}">＋ ${language === 'en' ? 'Add card' : 'إضافة بطاقة'}</button>
+      </div>
+      <div id="interviewCardList" class="interview-card-list" aria-live="polite"></div>
+      <footer id="interviewCardPagination" class="interview-card-pagination"></footer>
+    </section>`;
+  renderInterviewCardPage();
+  applyAutoDirection(workspace);
+  loadInterviewCards();
+}
+
+function renderInterviewCardPage() {
+  const list = document.getElementById('interviewCardList');
+  const pagination = document.getElementById('interviewCardPagination');
+  if (!list || !pagination) return;
+  const cards = interviewCardsPage.cards || [];
+  if (!interviewCardsPage.total) {
+    list.innerHTML = `<div class="interview-card-empty"><strong>${interviewCardQuery
+      ? (language === 'en' ? 'No matching cards' : 'لا توجد بطاقات مطابقة')
+      : (language === 'en' ? 'No cards in this topic yet' : 'لا توجد بطاقات في هذا الموضوع بعد')}</strong>
+      <span>${interviewCardQuery
+        ? (language === 'en' ? 'Try another search term.' : 'جرّب كلمات بحث أخرى.')
+        : (language === 'en' ? 'Add your first question and answer to start building this topic.' : 'أضف أول سؤال وإجابة لبدء بناء هذا الموضوع.')}</span></div>`;
+    pagination.innerHTML = '';
+    return;
+  }
+  list.innerHTML = cards.map((card, index) => `<article class="interview-library-card">
+    <span class="interview-library-card-number">${arabicNumber((interviewCardsPage.page - 1) * interviewCardsPage.pageSize + index + 1)}</span>
+    <div class="interview-library-card-content">
+      <p class="interview-library-card-label">${language === 'en' ? 'QUESTION' : 'السؤال'}</p>
+      <h5 dir="auto">${escapeHtml(card.question)}</h5>
+      <details class="interview-library-answer"><summary>${language === 'en' ? 'Show answer' : 'عرض الإجابة'}</summary><p dir="auto">${escapeHtml(card.answer)}</p></details>
+    </div>
+    <div class="interview-library-card-actions">
+      <button type="button" data-card-edit="${card.id}" data-card-topic="${card.topic_id}">${language === 'en' ? 'Edit' : 'تعديل'}</button>
+      <button type="button" data-card-delete="${card.id}" data-card-topic="${card.topic_id}">${language === 'en' ? 'Delete' : 'حذف'}</button>
+    </div>
+  </article>`).join('');
+  const firstCard = (interviewCardsPage.page - 1) * interviewCardsPage.pageSize + 1;
+  const lastCard = Math.min(interviewCardsPage.page * interviewCardsPage.pageSize, interviewCardsPage.total);
+  pagination.innerHTML = `<span>${language === 'en' ? `Showing ${arabicNumber(firstCard)}–${arabicNumber(lastCard)} of ${arabicNumber(interviewCardsPage.total)}` : `عرض ${arabicNumber(firstCard)}–${arabicNumber(lastCard)} من ${arabicNumber(interviewCardsPage.total)}`}</span>
+    <div class="interview-pagination-actions">
+      <button type="button" data-card-page="${interviewCardsPage.page - 1}" ${interviewCardsPage.page <= 1 ? 'disabled' : ''}>${language === 'en' ? 'Previous' : 'السابق'}</button>
+      <span>${arabicNumber(interviewCardsPage.page)} / ${arabicNumber(interviewCardsPage.pageCount)}</span>
+      <button type="button" data-card-page="${interviewCardsPage.page + 1}" ${interviewCardsPage.page >= interviewCardsPage.pageCount ? 'disabled' : ''}>${language === 'en' ? 'Next' : 'التالي'}</button>
+    </div>`;
+}
+
+async function loadInterviewCards() {
+  if (!activeInterviewTopicId) return;
+  const topicId = activeInterviewTopicId;
+  const requestId = ++interviewCardRequestId;
+  try {
+    const query = new URLSearchParams({
+      page: String(interviewCardsPage.page || 1),
+      pageSize: '20',
+      q: interviewCardQuery,
+    });
+    const result = await api(`/api/interviews/topics/${topicId}/cards?${query}`);
+    if (requestId !== interviewCardRequestId || topicId !== activeInterviewTopicId) return;
+    interviewCardsPage = result;
+    renderInterviewCardPage();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function renderInterviewQuiz() {
+  if (!interviewQuiz) return;
+  const quizDialog = document.getElementById('interviewQuizDialog');
+  const topic = interviewTopics.find(item => item.id === interviewQuiz.topicId);
+  const questionCount = interviewQuiz.cards.length;
+  const currentCard = interviewQuiz.cards[interviewQuiz.currentIndex];
+  if (!topic || !currentCard) {
+    return;
+  }
+  const progressPercent = ((interviewQuiz.currentIndex + 1) / questionCount) * 100;
+  document.getElementById('interviewQuizTopic').textContent = topic.title;
+  document.getElementById('interviewQuizProgress').textContent = `${language === 'en' ? 'Question' : 'السؤال'} ${arabicNumber(interviewQuiz.currentIndex + 1)} ${language === 'en' ? 'of' : 'من'} ${arabicNumber(questionCount)}`;
+  const progressBar = document.getElementById('interviewQuizProgressBar');
+  progressBar.style.width = `${progressPercent}%`;
+  progressBar.parentElement.setAttribute('aria-valuenow', String(progressPercent));
+  progressBar.parentElement.classList.remove('hidden');
+  const flashcard = document.getElementById('interviewFlashcard');
+  flashcard.classList.remove('hidden');
+  const flashcardText = document.getElementById('interviewFlashcardText');
+  const flashcardLabel = document.getElementById('interviewFlashcardLabel');
+  const flashcardHint = document.getElementById('interviewFlashcardHint');
+  const answerActions = document.getElementById('interviewQuizActions');
+  const summary = document.getElementById('interviewQuizSummary');
+  flashcard.setAttribute('aria-label', language === 'en'
+    ? (interviewQuiz.revealed ? 'Answer. Press to return to the question.' : 'Question. Press to reveal the answer.')
+    : (interviewQuiz.revealed ? 'الإجابة. اضغط للعودة إلى السؤال.' : 'السؤال. اضغط لإظهار الإجابة.'));
+
+  if (interviewQuiz.revealed) {
+    flashcardLabel.textContent = language === 'en' ? 'Answer' : 'الإجابة';
+    flashcardText.textContent = currentCard.answer;
+    flashcardHint.textContent = language === 'en' ? 'Press again to hide the answer.' : 'اضغط مجدداً لإخفاء الإجابة.';
+    answerActions.classList.remove('hidden');
+  } else {
+    flashcardLabel.textContent = language === 'en' ? 'Question' : 'السؤال';
+    flashcardText.textContent = currentCard.question;
+    flashcardHint.textContent = language === 'en' ? 'Tap to reveal the answer.' : 'اضغط لإظهار الإجابة.';
+    answerActions.classList.add('hidden');
+  }
+  summary.classList.add('hidden');
+  document.getElementById('interviewQuizFinish').classList.add('hidden');
+  flashcard.classList.toggle('revealed', interviewQuiz.revealed);
+  if (!quizDialog.open) quizDialog.showModal();
+}
+
+function finishInterviewQuiz() {
+  if (!interviewQuiz) return;
+  const summary = document.getElementById('interviewQuizSummary');
+  const knownCount = interviewQuiz.results.filter(result => result.outcome === 'known').length;
+  const reviewCount = interviewQuiz.results.filter(result => result.outcome === 'review').length;
+  const totalCount = interviewQuiz.results.length;
+  summary.innerHTML = `<strong>${language === 'en' ? 'Practice complete' : 'اكتمل التدريب'}</strong>
+    <span>${language === 'en' ? `${knownCount} of ${totalCount} marked as mastered` : `أتقنت ${arabicNumber(knownCount)} من ${arabicNumber(totalCount)} بطاقة`}</span>
+    <span>${language === 'en' ? `${reviewCount} to review again` : `${arabicNumber(reviewCount)} بطاقة تحتاج إلى مراجعة`}</span>`;
+  summary.classList.remove('hidden');
+  document.getElementById('interviewQuizProgress').textContent = language === 'en' ? 'Practice complete' : 'اكتمل التدريب';
+  document.querySelector('.interview-quiz-progress').classList.add('hidden');
+  document.getElementById('interviewFlashcard').classList.add('hidden');
+  document.getElementById('interviewQuizFinish').classList.remove('hidden');
+  document.getElementById('interviewQuizActions').classList.add('hidden');
+}
+
+async function startInterviewQuiz(topicId, count = '10') {
+  const topic = interviewTopics.find(item => item.id === Number(topicId));
+  if (!topic || !Number(topic.card_count)) {
+    showToast(language === 'en' ? 'This topic has no cards yet.' : 'هذا الموضوع لا يحتوي على بطاقات بعد.');
+    return;
+  }
+  try {
+    const query = new URLSearchParams({ count });
+    if (interviewCardQuery) query.set('q', interviewCardQuery);
+    const result = await api(`/api/interviews/topics/${topic.id}/quiz?${query}`);
+    if (!result.cards.length) {
+      showToast(language === 'en' ? 'No cards match this search.' : 'لا توجد بطاقات تطابق هذا البحث.');
+      return;
+    }
+  interviewQuiz = {
+    topicId: Number(topicId),
+      cards: result.cards,
+    currentIndex: 0,
+    results: [],
+    revealed: false,
+  };
+  document.getElementById('interviewQuizDialog').showModal();
+  renderInterviewQuiz();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function saveFocusAudioSettings() {
+  if (!currentUser) return;
+  localStorage.setItem(`personal-memo-focus-audio-${currentUser.id}`, JSON.stringify({
+    sound: document.getElementById('focusAmbienceSelect').value,
+    volume: Number(document.getElementById('focusAmbienceVolume').value),
+  }));
+}
+
+function stopFocusAmbience() {
+  if (focusAudioSource) {
+    focusAudioSource.stop();
+    focusAudioSource.disconnect();
+    focusAudioSource = null;
+  }
+  focusAudioGain = null;
+  const button = document.getElementById('focusAmbienceToggle');
+  if (button) {
+    button.setAttribute('aria-pressed', 'false');
+    button.textContent = language === 'en' ? '▶ Play sound' : '▶ تشغيل الصوت';
+  }
+}
+
+async function playFocusAmbience() {
+  const sound = document.getElementById('focusAmbienceSelect').value;
+  if (sound === 'off') {
+    stopFocusAmbience();
+    return;
+  }
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    showToast(language === 'en' ? 'Ambient audio is not supported in this browser.' : 'المتصفح لا يدعم تشغيل الأصوات المحيطة.');
+    return;
+  }
+  stopFocusAmbience();
+  focusAudioContext ||= new AudioContextClass();
+  await focusAudioContext.resume();
+  const sampleRate = focusAudioContext.sampleRate;
+  const noiseBuffer = focusAudioContext.createBuffer(1, sampleRate * 3, sampleRate);
+  const samples = noiseBuffer.getChannelData(0);
+  for (let index = 0; index < samples.length; index += 1) samples[index] = Math.random() * 2 - 1;
+
+  const source = focusAudioContext.createBufferSource();
+  source.buffer = noiseBuffer;
+  source.loop = true;
+  const filter = focusAudioContext.createBiquadFilter();
+  filter.type = sound === 'rain' ? 'highpass' : 'lowpass';
+  filter.frequency.value = sound === 'white' ? 12000 : sound === 'rain' ? 750 : sound === 'sea' ? 900 : 420;
+  const gain = focusAudioContext.createGain();
+  gain.gain.value = Number(document.getElementById('focusAmbienceVolume').value) / 100 * 0.16;
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(focusAudioContext.destination);
+  if (sound === 'sea' || sound === 'wind') {
+    const lfo = focusAudioContext.createOscillator();
+    const lfoDepth = focusAudioContext.createGain();
+    lfo.frequency.value = sound === 'sea' ? 0.11 : 0.07;
+    lfoDepth.gain.value = gain.gain.value * 0.85;
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(gain.gain);
+    lfo.start();
+    source.onended = () => lfo.stop();
+  }
+  source.start();
+  focusAudioSource = source;
+  focusAudioGain = gain;
+  const button = document.getElementById('focusAmbienceToggle');
+  button.setAttribute('aria-pressed', 'true');
+  button.textContent = language === 'en' ? '■ Stop sound' : '■ إيقاف الصوت';
+  document.getElementById('focusAmbienceStatus').textContent = language === 'en'
+    ? 'Sound is generated in your browser; no audio is uploaded.'
+    : 'يُنشأ الصوت في المتصفح ولا يتم رفع أي تسجيل.';
+}
+
+function tickFocusTimer() {
+  if (!focusTimer.running || !focusTimer.endsAt) return;
+  focusTimer.remainingSeconds = Math.max(0, Math.ceil((focusTimer.endsAt - Date.now()) / 1000));
+  renderFocusTimer();
+  if (focusTimer.remainingSeconds > 0) return;
+  focusTimer.running = false;
+  focusTimer.starting = false;
+  focusTimer.endsAt = null;
+  if (focusTimer.mode === 'focus') {
+    focusTimer.pendingSession = {
+      session_key: focusTimer.activeSessionKey,
+      focus_minutes: focusTimer.activeSessionMinutes || focusTimer.focusMinutes,
+      todo_id: focusTimer.activeTodoId,
+      context_label: focusTimer.activeContextLabel,
+    };
+    focusTimer.activeSessionKey = null;
+    focusTimer.activeSessionMinutes = null;
+    focusTimer.activeTodoId = null;
+    focusTimer.activeContextLabel = '';
+    focusTimer.mode = 'break';
+    focusTimer.remainingSeconds = focusTimer.breakMinutes * 60;
+    persistFocusTimer();
+    renderFocusTimer();
+    submitCompletedFocusSession().catch(error => showToast(error.message));
+  } else {
+    focusTimer.mode = 'focus';
+    focusTimer.remainingSeconds = focusTimer.focusMinutes * 60;
+    persistFocusTimer();
+    renderFocusTimer();
+    showToast(language === 'en' ? 'Break finished. Ready for another focus session?' : 'انتهت الاستراحة. هل أنت مستعد لجلسة تركيز جديدة؟');
+  }
+}
+
+async function submitCompletedFocusSession() {
+  if (!focusTimer.pendingSession) return;
+  const savedSession = focusTimer.pendingSession;
+  const result = await api('/api/focus/complete', { method: 'POST', body: JSON.stringify(savedSession) });
+  focusProgress = result;
+  focusTimer.pendingSession = null;
+  persistFocusTimer();
+  renderFocusTimer();
+  showToast(language === 'en'
+    ? `Focus session complete · +${result.xp_earned} XP`
+    : `اكتملت جلسة التركيز · أُضيفت ${arabicNumber(result.xp_earned)} نقطة خبرة`);
 }
 
 function renderNotifications() {
@@ -1349,6 +2147,22 @@ function renderNotifications() {
   const nowTime = Date.now();
   const nextDay = new Date(nowTime + 24 * 60 * 60 * 1000);
   const notifications = [];
+  financeReminders.forEach(subscription => {
+    const daysUntil = daysBetweenLocalDates(today, subscription.next_renewal_date);
+    if (daysUntil > 3 || (daysUntil > 0 && daysUntil < 3)) return;
+    notifications.push({
+      type: 'subscription',
+      id: subscription.id,
+      title: subscription.name,
+      detail: daysUntil < 0
+        ? `${language === 'en' ? 'Renewal overdue' : 'تجديد متأخر'} · ${formatDate(subscription.next_renewal_date)}`
+        : daysUntil === 0
+          ? `${language === 'en' ? 'Renews today' : 'يتجدد اليوم'} · ${formatDate(subscription.next_renewal_date)}`
+          : `${language === 'en' ? `Renews in ${daysUntil} days` : `يتجدد بعد ${arabicNumber(daysUntil)} أيام`} · ${formatDate(subscription.next_renewal_date)}`,
+      priority: daysUntil < 0 ? 0 : daysUntil === 0 ? 1 : 2,
+      key: `${currentUser?.id}:subscription:${subscription.id}:${subscription.next_renewal_date}`,
+    });
+  });
   todos.filter(todo => !todo.completed && todo.due_date).forEach(todo => {
     const key = `${currentUser?.id}:todo:${todo.id}:${todo.due_date}:${todo.due_time || ''}`;
     const dueAt = new Date(`${todo.due_date}T${todo.due_time || '23:59'}:00`);
@@ -1389,17 +2203,32 @@ function renderNotifications() {
         priority: 1,
         key,
       });
-      bookClubNotifications.forEach(notification => notifications.push({
-        type: 'club-mention',
-        id: notification.id,
-        clubId: notification.club_id,
-        title: `ذَكرك ${notification.sender_username} في ${notification.club_name}`,
-        detail: notification.content.slice(0, 120),
-        priority: 1,
-        key: `${currentUser?.id}:club-mention:${notification.id}`,
-      }));
     }
   });
+  const unfinishedHabits = habits.filter(habit => !habit.completed_today
+    && (habit.frequency === 'daily' || habit.completed_this_week < habit.target_per_week));
+  const unfinishedRoutines = routines.filter(routine => !routine.completed_today);
+  if (unfinishedHabits.length + unfinishedRoutines.length) {
+    notifications.push({
+      type: 'habits',
+      id: '',
+      title: language === 'en' ? 'A gentle nudge for today' : 'تذكير لطيف لليوم',
+      detail: language === 'en'
+        ? `${unfinishedHabits.length + unfinishedRoutines.length} habits or routines are still unfinished.`
+        : `لديك ${arabicNumber(unfinishedHabits.length + unfinishedRoutines.length)} من العادات أو الروتينات لم تُنجز بعد.`,
+      priority: 3,
+      key: `${currentUser?.id}:daily-habits:${today}`,
+    });
+  }
+  bookClubNotifications.forEach(notification => notifications.push({
+    type: 'club-mention',
+    id: notification.id,
+    clubId: notification.club_id,
+    title: `ذَكرك ${notification.sender_username} في ${notification.club_name}`,
+    detail: notification.content.slice(0, 120),
+    priority: 1,
+    key: `${currentUser?.id}:club-mention:${notification.id}`,
+  }));
   notifications.sort((first, second) => first.priority - second.priority || first.detail.localeCompare(second.detail, 'ar'));
   const nextNotificationKeys = new Set(notifications.map(notification => notification.key));
   let previousKeys = activeNotificationKeys;
@@ -1438,7 +2267,7 @@ function renderNotifications() {
       return `<button class="notification-item${notification.priority === 0 ? ' is-overdue' : ''}${isRead ? ' is-read' : ''}" type="button"
         data-notification-key="${escapeHtml(notification.key)}" data-notification-target="${notification.type}" data-notification-id="${notification.id}"
         ${notification.clubId ? `data-notification-club="${notification.clubId}"` : ''}${notification.date ? ` data-notification-date="${notification.date}"` : ''}>
-        <span class="notification-item-icon" aria-hidden="true">${notification.type === 'todo' ? '✓' : notification.type === 'club-mention' ? '@' : '◷'}</span>
+        <span class="notification-item-icon" aria-hidden="true">${notification.type === 'todo' ? '✓' : notification.type === 'club-mention' ? '@' : notification.type === 'subscription' ? '↻' : notification.type === 'habits' ? '✦' : '◷'}</span>
         <span><strong dir="auto">${escapeHtml(notification.title)}</strong><small>${escapeHtml(notification.detail)}</small></span>
         ${isRead ? '<span class="notification-read-label">مقروء</span>' : ''}
       </button>`;
@@ -2227,7 +3056,7 @@ async function refresh() {
 
 async function refreshWorkspace() {
   const calendarRange = calendarMonthRange();
-  [metrics, todos, articles, bookmarks, codeSnippets, learningTopics, areas, goals, projects, events, reminderEvents, habits, routines, todayPlan, weeklyReview, bookClubs, bookClubNotifications, pinnedEntries, noteIndex, galleryImages] = await Promise.all([
+  [metrics, todos, articles, bookmarks, codeSnippets, learningTopics, areas, goals, projects, events, reminderEvents, habits, routines, todayPlan, weeklyReview, bookClubs, bookClubNotifications, pinnedEntries, noteIndex, galleryImages, financeReminders, focusProgress, interviewApplications, interviewTopics] = await Promise.all([
     api('/api/metrics'),
     api('/api/todos'),
     api('/api/articles'),
@@ -2248,6 +3077,10 @@ async function refreshWorkspace() {
     api('/api/pins'),
     api('/api/note-index'),
     api('/api/gallery'),
+    api('/api/finance/reminders'),
+    api('/api/focus'),
+    api('/api/interviews'),
+    api('/api/interviews/mock'),
   ]);
   if (currentUser && !activeClubId) {
     const savedClubId = Number(localStorage.getItem(`personal-memo-active-club-${currentUser.id}`));
@@ -2271,6 +3104,10 @@ async function refreshWorkspace() {
   if (activeWorkspace === 'timeline') renderTimeline();
   if (activeWorkspace === 'clubs' && activeClubId) await loadBookClub(activeClubId);
   renderNotifications();
+  renderInterviewApplications();
+  renderInterviewPractice();
+  renderFocusTodoOptions();
+  renderFocusTimer();
   checkTaskReminders();
 }
 
@@ -2841,6 +3678,7 @@ async function loadAccountSettings() {
   applyLanguage(language);
   document.querySelector('#settingsForm [name="language"]').value = language;
   document.querySelector('#settingsForm [name="financeCurrency"]').value = settings.financeCurrency || 'EGP';
+  initializeFocusTimer(settings);
   prayerLocation = {
     latitude: settings.prayerLatitude,
     longitude: settings.prayerLongitude,
@@ -3608,14 +4446,23 @@ document.getElementById('notificationsList').addEventListener('click', event => 
       .then(async () => {
         bookClubNotifications = bookClubNotifications.filter(row => row.id !== Number(notification.dataset.notificationId));
         setWorkspaceView('clubs', true);
-        await loadBookClub(Number(notification.dataset.clubId));
+        await loadBookClub(Number(notification.dataset.notificationClub));
         renderNotifications();
       })
       .catch(error => showToast(error.message));
     return;
   }
   renderNotifications();
-  setWorkspaceView(notification.dataset.notificationTarget === 'todo' ? 'todos' : 'calendar', true);
+  const target = notification.dataset.notificationTarget;
+  if (target === 'subscription') {
+    setWorkspaceView('finance', true);
+    return;
+  }
+  if (target === 'habits') {
+    setWorkspaceView('habits', true);
+    return;
+  }
+  setWorkspaceView(target === 'todo' ? 'todos' : 'calendar', true);
   if (notification.dataset.notificationTarget === 'todo') {
     document.querySelector('[data-todo-filter="all"]').click();
     document.getElementById(`todo-${notification.dataset.notificationId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -3680,11 +4527,32 @@ document.getElementById('quranRadioSelect').addEventListener('change', async eve
   }
 });
 document.getElementById('quranAudio').addEventListener('error', () => {
+  setQuranPlaybackState(false);
   document.getElementById('quranPlayerStatus').textContent = language === 'en'
     ? 'Audio could not be loaded. Choose another station or try again later.'
     : 'تعذّر تحميل الصوت. اختر إذاعة أخرى أو حاول لاحقاً.';
 });
+document.getElementById('quranAudio').addEventListener('playing', () => setQuranPlaybackState(true));
+document.getElementById('quranAudio').addEventListener('pause', () => setQuranPlaybackState(false));
+document.getElementById('quranAudio').addEventListener('ended', () => setQuranPlaybackState(false));
 document.getElementById('financeMonth').addEventListener('change', loadFinance);
+function shiftFinanceMonth(offset) {
+  const monthInput = document.getElementById('financeMonth');
+  if (!monthInput.value) monthInput.value = localToday().slice(0, 7);
+  const date = new Date(`${monthInput.value}-01T12:00:00`);
+  date.setMonth(date.getMonth() + offset);
+  monthInput.value = localDateValue(date).slice(0, 7);
+  loadFinance();
+}
+document.getElementById('financePreviousMonth').addEventListener('click', () => shiftFinanceMonth(-1));
+document.getElementById('financeNextMonth').addEventListener('click', () => shiftFinanceMonth(1));
+document.getElementById('financeSearch').addEventListener('input', renderFinance);
+document.getElementById('financeTypeFilters').addEventListener('click', event => {
+  const button = event.target.closest('[data-finance-filter]');
+  if (!button) return;
+  financeTransactionFilter = button.dataset.financeFilter;
+  renderFinance();
+});
 document.getElementById('addFinanceTransaction').addEventListener('click', () => openFinanceDialog('transaction'));
 document.getElementById('addFinanceSubscription').addEventListener('click', () => openFinanceDialog('subscription'));
 document.getElementById('addFinanceBudget').addEventListener('click', () => openFinanceDialog('budget'));
@@ -3868,6 +4736,7 @@ document.getElementById('settingsForm').addEventListener('submit', async event =
   try {
     await api('/api/settings', { method: 'PUT', body: JSON.stringify(settings) });
     applyLanguage(settings.language);
+    if (activeWorkspace === 'interviews') renderInterviewApplications();
     document.querySelector('#settingsForm [name="language"]').value = settings.language;
     prayerLocation = {
       latitude: settings.prayerLatitude,
@@ -5028,6 +5897,419 @@ document.querySelectorAll('dialog').forEach(dialog => {
 });
 
 setTheme('system');
+document.getElementById('focusTodoSelect').addEventListener('change', event => {
+  focusTimer.activeTodoId = event.currentTarget.value || null;
+  persistFocusTimer();
+});
+document.getElementById('focusContextInput').addEventListener('input', event => {
+  focusTimer.activeContextLabel = event.currentTarget.value.trim();
+  persistFocusTimer();
+});
+document.getElementById('focusAmbienceToggle').addEventListener('click', () => {
+  if (focusAudioSource) {
+    stopFocusAmbience();
+    return;
+  }
+  playFocusAmbience().catch(error => showToast(error.message));
+});
+document.getElementById('focusAmbienceSelect').addEventListener('change', () => {
+  saveFocusAudioSettings();
+  if (document.getElementById('focusAmbienceSelect').value === 'off') {
+    stopFocusAmbience();
+  } else if (focusAudioSource) {
+    playFocusAmbience().catch(error => showToast(error.message));
+  }
+});
+document.getElementById('focusAmbienceVolume').addEventListener('input', event => {
+  if (focusAudioGain) focusAudioGain.gain.value = Number(event.currentTarget.value) / 100 * 0.16;
+  saveFocusAudioSettings();
+});
+document.getElementById('addInterviewApplication').addEventListener('click', () => openInterviewApplicationForm());
+document.getElementById('interviewApplicationSearch').addEventListener('input', event => {
+  interviewApplicationQuery = event.currentTarget.value;
+  renderInterviewApplications();
+});
+document.getElementById('interviewApplicationFilter').addEventListener('change', event => {
+  interviewApplicationFilter = event.currentTarget.value;
+  renderInterviewApplications();
+});
+document.getElementById('interviewApplicationForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.elements.id.value;
+  const payload = Object.fromEntries(['company', 'role', 'status', 'job_url', 'applied_on', 'notes']
+    .map(key => [key, form.elements[key].value.trim()]));
+  try {
+    await api(id ? `/api/interviews/${id}` : '/api/interviews', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+    interviewApplications = await api('/api/interviews');
+    renderInterviewApplications();
+    document.getElementById('interviewApplicationDialog').close();
+    showToast(language === 'en' ? 'Application saved.' : 'تم حفظ طلب التوظيف.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+document.getElementById('interviewRoundForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const applicationId = form.elements.applicationId.value;
+  const roundId = form.elements.roundId.value;
+  const payload = Object.fromEntries(['round_name', 'occurred_on', 'scheduled_start', 'scheduled_end',
+    'questions_answers', 'questions_for_them', 'experience', 'follow_up']
+    .map(key => [key, form.elements[key].value.trim()]));
+  try {
+    await api(roundId
+      ? `/api/interviews/${applicationId}/rounds/${roundId}`
+      : `/api/interviews/${applicationId}/rounds`, {
+      method: roundId ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+    interviewApplications = await api('/api/interviews');
+    renderInterviewApplications();
+    document.getElementById('interviewRoundDialog').close();
+    showToast(language === 'en' ? 'Interview notes saved.' : 'تم حفظ سجل المقابلة.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+document.getElementById('interviewRoundForm').elements.scheduled_start.addEventListener('input', event => {
+  const form = event.currentTarget.form;
+  const start = event.currentTarget.value;
+  const endInput = form.elements.scheduled_end;
+  if (!start || endInput.value && new Date(endInput.value) > new Date(start)) return;
+  const end = new Date(start);
+  end.setHours(end.getHours() + 1);
+  endInput.value = new Date(end.getTime() - end.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+});
+document.getElementById('interviewApplicationList').addEventListener('click', async event => {
+  const calendarLink = event.target.closest('a[data-interview-calendar-date]');
+  if (calendarLink) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectedCalendarDate = calendarLink.dataset.interviewCalendarDate;
+    calendarMonth = new Date(`${selectedCalendarDate.slice(0, 7)}-01T12:00:00`);
+    setWorkspaceView('calendar', true);
+    const range = calendarMonthRange();
+    try {
+      events = await api(`/api/events?start=${range.start}&end=${range.end}`);
+      renderCalendar();
+      renderNotifications();
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (button.hasAttribute('data-interview-empty-add')) return openInterviewApplicationForm();
+  const applicationId = Number(
+    button.dataset.interviewEditApplication || button.dataset.interviewDeleteApplication || button.dataset.interviewAddRound,
+  );
+  if (button.dataset.interviewEditApplication) {
+    return openInterviewApplicationForm(interviewApplications.find(application => application.id === applicationId));
+  }
+  if (button.dataset.interviewAddRound) return openInterviewRoundForm(applicationId);
+  if (button.dataset.interviewEditRound) {
+    event.preventDefault();
+    event.stopPropagation();
+    const parentId = Number(button.dataset.interviewParent);
+    const application = interviewApplications.find(row => row.id === parentId);
+    const round = application?.rounds.find(row => row.id === Number(button.dataset.interviewEditRound));
+    if (round) openInterviewRoundForm(parentId, round);
+    return;
+  }
+  if (button.dataset.interviewDeleteRound) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!window.confirm(language === 'en' ? 'Delete these interview notes?' : 'هل تريد حذف ملاحظات المقابلة؟')) return;
+    try {
+      await api(`/api/interviews/${button.dataset.interviewParent}/rounds/${button.dataset.interviewDeleteRound}`, { method: 'DELETE' });
+      interviewApplications = await api('/api/interviews');
+      renderInterviewApplications();
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  if (button.dataset.interviewDeleteApplication) {
+    if (!window.confirm(language === 'en'
+      ? 'Delete this application and all of its interview notes?'
+      : 'هل تريد حذف طلب التوظيف وكل سجلات مقابلاته؟')) return;
+    try {
+      await api(`/api/interviews/${applicationId}`, { method: 'DELETE' });
+      interviewApplications = await api('/api/interviews');
+      renderInterviewApplications();
+      showToast(language === 'en' ? 'Application deleted.' : 'تم حذف طلب التوظيف.');
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+});
+
+document.querySelectorAll('.interview-tab').forEach(tab => {
+  tab.addEventListener('click', () => setInterviewView(tab.dataset.interviewView));
+});
+
+document.getElementById('addInterviewTopic').addEventListener('click', () => openInterviewTopicForm());
+
+document.getElementById('interviewTopicForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.elements.id.value;
+  const payload = { title: form.elements.title.value.trim() };
+  try {
+    await api(id ? `/api/interviews/topics/${id}` : '/api/interviews/topics', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+    interviewTopics = await api('/api/interviews/mock');
+    renderInterviewPractice();
+    document.getElementById('interviewTopicDialog').close();
+    showToast(language === 'en' ? 'Topic saved.' : 'تم حفظ الموضوع.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+document.getElementById('interviewCardForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const topicId = form.elements.topicId.value;
+  const cardId = form.elements.cardId.value;
+  const payload = {
+    question: form.elements.question.value.trim(),
+    answer: form.elements.answer.value.trim(),
+  };
+  try {
+    await api(cardId ? `/api/interviews/topics/${topicId}/cards/${cardId}` : `/api/interviews/topics/${topicId}/cards`, {
+      method: cardId ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+    interviewTopics = await api('/api/interviews/mock');
+    renderInterviewPractice();
+    document.getElementById('interviewCardDialog').close();
+    showToast(language === 'en' ? 'Flashcard saved.' : 'تم حفظ البطاقة.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+document.getElementById('interviewPracticeWorkspace').addEventListener('click', async event => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (button.hasAttribute('data-topic-empty-add')) return openInterviewTopicForm();
+  if (button.dataset.topicSelect) {
+    activeInterviewTopicId = Number(button.dataset.topicSelect);
+    interviewCardQuery = '';
+    interviewCardsPage = { cards: [], total: 0, page: 1, pageSize: 20, pageCount: 0 };
+    return renderInterviewPractice();
+  }
+  if (button.dataset.topicQuiz) {
+    const count = document.querySelector('[data-quiz-count]')?.value || '10';
+    return startInterviewQuiz(button.dataset.topicQuiz, count);
+  }
+  if (button.dataset.topicAddCard) return openInterviewCardForm(button.dataset.topicAddCard);
+  if (button.dataset.topicEdit) {
+    const topic = interviewTopics.find(item => item.id === Number(button.dataset.topicEdit));
+    if (topic) openInterviewTopicForm(topic);
+    return;
+  }
+  if (button.dataset.topicDelete) {
+    if (!window.confirm(language === 'en' ? 'Delete this mock interview topic and all cards in it?' : 'هل تريد حذف هذا الموضوع وكل بطاقاته؟')) return;
+    try {
+      await api(`/api/interviews/topics/${button.dataset.topicDelete}`, { method: 'DELETE' });
+      interviewTopics = await api('/api/interviews/mock');
+      renderInterviewPractice();
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  if (button.dataset.cardEdit) {
+    const topicId = Number(button.dataset.cardTopic);
+    const topic = interviewTopics.find(item => item.id === topicId);
+    const card = topic?.cards.find(item => item.id === Number(button.dataset.cardEdit));
+    if (card) openInterviewCardForm(topicId, card);
+    return;
+  }
+  if (button.dataset.cardDelete) {
+    const topicId = Number(button.dataset.cardTopic);
+    if (!window.confirm(language === 'en' ? 'Delete this flashcard?' : 'هل تريد حذف هذه البطاقة؟')) return;
+    try {
+      await api(`/api/interviews/topics/${topicId}/cards/${button.dataset.cardDelete}`, { method: 'DELETE' });
+      interviewTopics = await api('/api/interviews/mock');
+      renderInterviewPractice();
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  if (button.hasAttribute('data-card-page')) {
+    const page = Number(button.dataset.cardPage);
+    if (!Number.isInteger(page) || page < 1 || page > interviewCardsPage.pageCount) return;
+    interviewCardsPage.page = page;
+    return loadInterviewCards();
+  }
+});
+
+document.getElementById('interviewPracticeWorkspace').addEventListener('input', event => {
+  if (!event.target.matches('[data-card-search]')) return;
+  interviewCardQuery = event.target.value.trim();
+  clearTimeout(interviewCardSearchTimer);
+  interviewCardSearchTimer = setTimeout(() => {
+    interviewCardsPage.page = 1;
+    loadInterviewCards();
+  }, 220);
+});
+
+document.getElementById('interviewFlashcard').addEventListener('click', () => {
+  if (!interviewQuiz) return;
+  interviewQuiz.revealed = !interviewQuiz.revealed;
+  renderInterviewQuiz();
+});
+
+document.getElementById('interviewQuizKnown').addEventListener('click', () => {
+  rateInterviewQuizCard('known');
+});
+
+document.getElementById('interviewQuizAgain').addEventListener('click', () => {
+  rateInterviewQuizCard('review');
+});
+
+function rateInterviewQuizCard(outcome) {
+  if (!interviewQuiz) return;
+  interviewQuiz.results.push({ outcome, cardId: interviewQuiz.cards[interviewQuiz.currentIndex].id });
+  interviewQuiz.currentIndex += 1;
+  interviewQuiz.revealed = false;
+  if (interviewQuiz.currentIndex >= interviewQuiz.cards.length) {
+    finishInterviewQuiz();
+    return;
+  }
+  renderInterviewQuiz();
+}
+
+document.getElementById('interviewQuizFinish').addEventListener('click', () => {
+  interviewQuiz = null;
+  document.getElementById('interviewQuizDialog').close();
+});
+
+document.getElementById('focusTimerStart').addEventListener('click', () => {
+  if (focusTimer.running || focusTimer.starting) return;
+  const start = () => {
+    if (focusTimer.remainingSeconds <= 0) {
+      focusTimer.remainingSeconds = (focusTimer.mode === 'focus' ? focusTimer.focusMinutes : focusTimer.breakMinutes) * 60;
+    }
+    focusTimer.endsAt = Date.now() + focusTimer.remainingSeconds * 1000;
+    focusTimer.running = true;
+    persistFocusTimer();
+    renderFocusTimer();
+  };
+  if (focusTimer.mode !== 'focus') {
+    start();
+    return;
+  }
+  if (!focusTimer.activeSessionKey) {
+    focusTimer.activeSessionKey = createFocusSessionKey();
+    focusTimer.activeSessionMinutes = focusTimer.focusMinutes;
+    focusTimer.activeTodoId = document.getElementById('focusTodoSelect').value || null;
+    focusTimer.activeContextLabel = document.getElementById('focusContextInput').value.trim();
+  }
+  focusTimer.starting = true;
+  persistFocusTimer();
+  renderFocusTimer();
+  api('/api/focus/start', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_key: focusTimer.activeSessionKey,
+      focus_minutes: focusTimer.activeSessionMinutes,
+      todo_id: focusTimer.activeTodoId,
+      context_label: focusTimer.activeContextLabel,
+    }),
+  }).then(() => {
+    focusTimer.starting = false;
+    start();
+  }).catch(error => {
+    focusTimer.starting = false;
+    renderFocusTimer();
+    showToast(error.message);
+  });
+});
+document.getElementById('focusTimerPause').addEventListener('click', () => {
+  if (!focusTimer.running || focusTimer.starting) return;
+  if (focusTimer.endsAt <= Date.now()) {
+    tickFocusTimer();
+    return;
+  }
+  const sessionKey = focusTimer.activeSessionKey;
+  focusTimer.starting = true;
+  renderFocusTimer();
+  api('/api/focus/pause', {
+    method: 'POST',
+    body: JSON.stringify({ session_key: sessionKey }),
+  }).then(() => {
+    if (!focusTimer.running || focusTimer.activeSessionKey !== sessionKey) return;
+    focusTimer.remainingSeconds = Math.max(0, Math.ceil((focusTimer.endsAt - Date.now()) / 1000));
+    focusTimer.running = false;
+    focusTimer.starting = false;
+    focusTimer.endsAt = null;
+    persistFocusTimer();
+    renderFocusTimer();
+  }).catch(error => {
+    focusTimer.starting = false;
+    renderFocusTimer();
+    if (focusTimer.activeSessionKey === sessionKey || focusTimer.pendingSession) showToast(error.message);
+  });
+});
+document.getElementById('focusTimerReset').addEventListener('click', () => {
+  if (focusTimer.starting) return;
+  const activeSessionKey = focusTimer.activeSessionKey;
+  focusTimer.activeSessionKey = null;
+  focusTimer.activeSessionMinutes = null;
+  focusTimer.activeTodoId = null;
+  focusTimer.activeContextLabel = '';
+  focusTimer.running = false;
+  focusTimer.endsAt = null;
+  focusTimer.remainingSeconds = (focusTimer.mode === 'focus' ? focusTimer.focusMinutes : focusTimer.breakMinutes) * 60;
+  persistFocusTimer();
+  renderFocusTimer();
+  if (activeSessionKey) {
+    api(`/api/focus/${encodeURIComponent(activeSessionKey)}`, { method: 'DELETE' })
+      .catch(error => showToast(error.message));
+  }
+});
+document.getElementById('focusTimerSync').addEventListener('click', () => {
+  submitCompletedFocusSession().catch(error => showToast(error.message));
+});
+document.getElementById('saveFocusSettings').addEventListener('click', async () => {
+  const focusMinutes = Number(document.getElementById('focusDurationInput').value);
+  const breakMinutes = Number(document.getElementById('focusBreakInput').value);
+  if (!Number.isInteger(focusMinutes) || focusMinutes < 1 || focusMinutes > 180
+    || !Number.isInteger(breakMinutes) || breakMinutes < 1 || breakMinutes > 60) {
+    showToast(language === 'en' ? 'Focus must be 1–180 minutes and break 1–60 minutes.' : 'مدة التركيز من ١ إلى ١٨٠ دقيقة والاستراحة من ١ إلى ٦٠ دقيقة.');
+    return;
+  }
+  try {
+    await api('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ focusDurationMinutes: focusMinutes, focusBreakMinutes: breakMinutes }),
+    });
+    focusTimer.focusMinutes = focusMinutes;
+    focusTimer.breakMinutes = breakMinutes;
+    focusTimer.mode = 'focus';
+    focusTimer.remainingSeconds = focusMinutes * 60;
+    persistFocusTimer();
+    renderFocusTimer();
+    showToast(language === 'en' ? 'Timer durations saved.' : 'تم حفظ مدد المؤقّت.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) tickFocusTimer();
+});
 window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => {
   if (themeMode === 'system') setTheme('system');
 });
