@@ -20,8 +20,27 @@ function createNotesRouter({
   const router = express.Router();
 
   router.get('/articles', (req, res) => {
-    res.json(db.prepare(`SELECT id,title,url,description,excerpt,review,status,created_at,updated_at FROM saved_articles
-      WHERE user_id=? AND deleted_at IS NULL ORDER BY updated_at DESC,id DESC`).all(req.user.id));
+    const paginated = ['page', 'pageSize', 'q'].some(key => req.query[key] !== undefined);
+    if (!paginated) {
+      return res.json(db.prepare(`SELECT id,title,url,description,excerpt,review,status,created_at,updated_at FROM saved_articles
+        WHERE user_id=? AND deleted_at IS NULL ORDER BY updated_at DESC,id DESC`).all(req.user.id));
+    }
+    const query = text(req.query.q).slice(0, 200);
+    const requestedPage = Number.parseInt(req.query.page, 10);
+    const requestedPageSize = Number.parseInt(req.query.pageSize, 10);
+    const pageSize = Number.isInteger(requestedPageSize) ? Math.min(100, Math.max(1, requestedPageSize)) : 25;
+    const requestedPageNumber = Number.isInteger(requestedPage) ? Math.max(1, requestedPage) : 1;
+    const where = `user_id=? AND deleted_at IS NULL${query
+      ? ' AND (instr(lower(title),lower(?))>0 OR instr(lower(url),lower(?))>0 OR instr(lower(description),lower(?))>0 OR instr(lower(excerpt),lower(?))>0 OR instr(lower(review),lower(?))>0)'
+      : ''}`;
+    const params = query ? [req.user.id, query, query, query, query, query] : [req.user.id];
+    const total = db.prepare(`SELECT COUNT(*) AS count FROM saved_articles WHERE ${where}`).get(...params).count;
+    const pageCount = Math.ceil(total / pageSize);
+    const page = Math.min(requestedPageNumber, Math.max(1, pageCount));
+    const items = db.prepare(`SELECT id,title,url,description,excerpt,review,status,created_at,updated_at FROM saved_articles
+      WHERE ${where} ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?`)
+      .all(...params, pageSize, (page - 1) * pageSize);
+    res.json({ items, total, page, pageSize, pageCount });
   });
 
   router.post('/articles', (req, res) => {

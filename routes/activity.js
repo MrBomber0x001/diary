@@ -86,8 +86,12 @@ function createActivityRouter({ db, now, text, localToday, localTime, validDate 
     if ((new Date(`${endDate}T00:00:00Z`) - new Date(`${startDate}T00:00:00Z`)) / 86400000 > 90) {
       return res.status(400).json({ error: 'اعرض تقويماً لمدة لا تتجاوز ٩٠ يوماً.' });
     }
-    const rows = db.prepare(`SELECT * FROM calendar_events WHERE user_id=? AND starts_at<=?
-      AND (recurrence<>'none' OR starts_at>=?) ORDER BY starts_at,title`)
+    const rows = db.prepare(`SELECT e.*,r.application_id AS interview_application_id,
+      a.company AS interview_company,a.role AS interview_role
+      FROM calendar_events e
+      LEFT JOIN interview_rounds r ON r.calendar_event_id=e.id AND r.user_id=e.user_id
+      LEFT JOIN interview_applications a ON a.id=r.application_id AND a.user_id=r.user_id
+      WHERE e.user_id=? AND e.starts_at<=? AND (e.recurrence<>'none' OR e.starts_at>=?) ORDER BY e.starts_at,e.title`)
       .all(req.user.id, `${endDate}T23:59`, `${startDate}T00:00`);
     const occurrences = rows.flatMap(event => recurringEventDates(event, startDate, endDate).map(date => ({
       ...event,
@@ -356,8 +360,12 @@ function createActivityRouter({ db, now, text, localToday, localTime, validDate 
     const today = localToday();
     const dayStart = `${today}T00:00`;
     const dayEnd = `${today}T23:59`;
-    const rows = db.prepare(`SELECT id,title,description,starts_at,ends_at,all_day,recurrence FROM calendar_events
-      WHERE user_id=? AND starts_at<=? AND (recurrence<>'none' OR starts_at>=?) ORDER BY starts_at`)
+    const rows = db.prepare(`SELECT e.id,e.title,e.description,e.starts_at,e.ends_at,e.all_day,e.recurrence,
+      r.application_id AS interview_application_id,a.company AS interview_company,a.role AS interview_role
+      FROM calendar_events e
+      LEFT JOIN interview_rounds r ON r.calendar_event_id=e.id AND r.user_id=e.user_id
+      LEFT JOIN interview_applications a ON a.id=r.application_id AND a.user_id=r.user_id
+      WHERE e.user_id=? AND e.starts_at<=? AND (e.recurrence<>'none' OR e.starts_at>=?) ORDER BY e.starts_at`)
       .all(req.user.id, dayEnd, dayStart);
     const events = rows.flatMap(event => recurringEventDates(event, today, today).map(date => ({
       ...event,

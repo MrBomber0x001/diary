@@ -185,6 +185,27 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(createdItem.response.status, 201);
   itemId = createdItem.result.id;
 
+  const spaShell = await request('/', { cookie: ownerCookie });
+  assert.equal(spaShell.response.status, 200);
+  const spaHtml = new TextDecoder().decode(spaShell.result);
+  assert.match(spaHtml, /<div id="root"><\/div>/);
+  assert.doesNotMatch(spaHtml, /legacy-shell|app\.js|i18n\.js/);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'src', 'legacy-shell.html')), false);
+  const reactEntry = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.jsx'), 'utf8');
+  assert.doesNotMatch(reactEntry, /dangerouslySetInnerHTML|legacy-shell|loadClassicScript/);
+  const clientBundlePath = spaHtml.match(/src="(\/assets\/[^"]+\.js)"/)?.[1];
+  assert.ok(clientBundlePath, 'React client bundle is referenced by the SPA shell');
+  assert.equal((await request(clientBundlePath)).response.status, 200);
+  const stylesheetPath = spaHtml.match(/href="(\/assets\/[^"]+\.css)"/)?.[1];
+  assert.ok(stylesheetPath, 'Bundled React stylesheet is referenced by the SPA shell');
+  assert.equal((await request(stylesheetPath)).response.status, 200);
+  assert.equal((await request('/app.js')).response.status, 404);
+
+  const itemPage = await request(`/item/${itemId}`, { cookie: ownerCookie });
+  assert.equal(itemPage.response.status, 200);
+  assert.match(new TextDecoder().decode(itemPage.result), /<div id="root"><\/div>/);
+  assert.equal((await request(`/item/${itemId}`)).response.status, 401);
+
   const audioForm = new FormData();
   audioForm.append('audioFiles', new Blob(['ID3'], { type: 'audio/mpeg' }), 'sample.mp3');
   const audioResponse = await request(`/api/items/${itemId}/audio`, {
@@ -204,6 +225,19 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     status: 'unread',
   }, ownerCookie);
   assert.equal(article.response.status, 201);
+  const paginatedArticles = await request('/api/articles?page=1&pageSize=1&q=Searchable', { cookie: ownerCookie });
+  assert.equal(paginatedArticles.response.status, 200);
+  assert.deepEqual({
+    total: paginatedArticles.result.total,
+    page: paginatedArticles.result.page,
+    pageSize: paginatedArticles.result.pageSize,
+    pageCount: paginatedArticles.result.pageCount,
+  }, { total: 1, page: 1, pageSize: 1, pageCount: 1 });
+  assert.equal(paginatedArticles.result.items[0].id, article.result.id);
+  const emptyArticlePage = await request('/api/articles?page=9&pageSize=1&q=No%20matching%20article', { cookie: ownerCookie });
+  assert.equal(emptyArticlePage.result.page, 1);
+  assert.equal(emptyArticlePage.result.pageCount, 0);
+  assert.equal(emptyArticlePage.result.items.length, 0);
 
   const bookmark = await jsonRequest('/api/bookmarks', 'POST', {
     title: 'Regression guide',
@@ -325,6 +359,9 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(scheduledEvents.result.length, 1);
   assert.equal(scheduledEvents.result[0].id, interviewRound.result.calendar_event_id);
   assert.match(scheduledEvents.result[0].title, /Software Engineer/);
+  assert.equal(scheduledEvents.result[0].interview_application_id, application.result.id);
+  assert.equal(scheduledEvents.result[0].interview_company, application.result.company);
+  assert.equal(scheduledEvents.result[0].interview_role, application.result.role);
   assert.equal((await request(`/api/events/${interviewRound.result.calendar_event_id}`, {
     method: 'DELETE',
     cookie: learningGuestCookie,
@@ -775,6 +812,18 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   const monthEvents = await request(`/api/events?start=${today.result.date.slice(0, 8)}01&end=${today.result.date.slice(0, 8)}31`, { cookie: ownerCookie });
   assert.equal(monthEvents.response.status, 200);
   assert.ok(monthEvents.result.some(event => event.id === calendarEvent.result.id));
+  const todayInterviewRound = await jsonRequest(`/api/interviews/${application.result.id}/rounds`, 'POST', {
+    round_name: 'Today follow-up',
+    occurred_on: today.result.date,
+    scheduled_start: `${today.result.date}T12:00`,
+    scheduled_end: `${today.result.date}T12:30`,
+  }, ownerCookie);
+  assert.equal(todayInterviewRound.response.status, 201);
+  const todayWithInterview = await request('/api/today', { cookie: ownerCookie });
+  const linkedInterviewEvent = todayWithInterview.result.events.find(event => event.id === todayInterviewRound.result.calendar_event_id);
+  assert.equal(linkedInterviewEvent.interview_application_id, application.result.id);
+  assert.equal(linkedInterviewEvent.interview_company, application.result.company);
+  assert.equal(linkedInterviewEvent.interview_role, updatedApplication.result.role);
 
   const habit = await jsonRequest('/api/habits', 'POST', {
     title: 'Walk',

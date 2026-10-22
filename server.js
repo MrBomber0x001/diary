@@ -1642,10 +1642,17 @@ registerApiRoutes(app, {
     audioDir: AUDIO_DIR,
   },
   library: { db, KINDS, ITEM_COLUMNS, getOwnedItem, validateItem, text, now, createUndoableDelete },
-  itemPage: { authenticate, getOwnedItem, publicDirectory: path.join(__dirname, 'public') },
+  itemPage: { authenticate, getOwnedItem, publicDirectory: path.join(__dirname, 'dist') },
 });
 
-app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
+const distDirectory = path.join(__dirname, 'dist');
+app.use(express.static(distDirectory, { index: 'index.html' }));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/') || path.extname(req.path)) return next();
+  res.sendFile(path.join(distDirectory, 'index.html'), error => {
+    if (error) next(error);
+  });
+});
 app.use((error, req, res, next) => {
   console.error('Personal Memo request failed:', error);
   if (res.headersSent) return next(error);

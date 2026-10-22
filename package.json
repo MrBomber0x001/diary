@@ -4,7 +4,11 @@
   "private": true,
   "description": "A private local memo and media-tracking app",
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "prestart": "vite build",
     "start": "node server.js",
+    "pretest": "vite build",
     "test": "node --test"
   },
   "dependencies": {
@@ -13,6 +17,11 @@
     "better-sqlite3": "^11.3.0",
     "express": "^4.19.2",
     "multer": "^2.4.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
   }
 }
