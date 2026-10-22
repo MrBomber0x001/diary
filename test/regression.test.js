@@ -5,8 +5,13 @@ const path = require('node:path');
 const { after, before, test } = require('node:test');
 const yauzl = require('yauzl');
 const Database = require('better-sqlite3');
+const express = require('express');
+const createAIInterviewsRouter = require('../routes/ai-interviews');
+const createFinanceAIRouter = require('../routes/finance-ai');
+const aiProvider = require('../lib/ai-provider');
 
 const testDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'personal-memo-regression-'));
+process.env.PERSONAL_MEMO_AI_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('hex');
 process.env.PERSONAL_MEMO_DB = path.join(testDirectory, 'memo.sqlite');
 process.env.PERSONAL_MEMO_UPLOAD_DIR = path.join(testDirectory, 'uploads');
 process.env.PERSONAL_MEMO_AUDIO_DIR = path.join(testDirectory, 'audio');
@@ -119,6 +124,91 @@ async function jsonRequest(url, method, payload, cookie) {
   });
 }
 
+async function withAIHarness(userId, callback) {
+  let callNumber = 0;
+  const providerRequests = [];
+  const aiApp = express();
+  aiApp.use(express.json({ limit: '32kb' }));
+  aiApp.use((req, res, next) => { req.user = { id: userId }; next(); });
+  const requestProviderCompletion = async ({ messages }) => {
+    const prompt = messages.at(-1)?.content || '';
+    providerRequests.push(prompt);
+    if (prompt.includes('Reply with the single word OK.')) return 'OK';
+    const data = JSON.parse(prompt);
+    if (data.task?.startsWith('Review these finance aggregates')) {
+      return JSON.stringify({
+        overview: 'Spending is concentrated in the largest categories in the selected period.',
+        observations: ['The supplied data covers six months.'],
+        actions: [{ action: 'Review recurring costs alongside current priorities.', category: 'Subscriptions', priority: 'medium' }],
+        watchouts: ['This is educational guidance, not professional financial advice.'],
+      });
+    }
+    if (data.task?.startsWith('Start this interview')) return JSON.stringify({ question: 'Tell me about a challenging project.' });
+    if (data.task?.startsWith('Review this interview')) {
+      return JSON.stringify({
+        summary: 'A focused practice session.',
+        overall_score: 3,
+        top_strengths: ['Clear communication'],
+        focus_areas: ['Add more detail'],
+        next_steps: ['Practice a concise example'],
+      });
+    }
+    callNumber += 1;
+    if (data.final_question) {
+      return JSON.stringify({
+        feedback: 'You clearly explained the trade-offs.',
+        strengths: ['Clear technical reasoning'],
+        improvements: ['Add measurable outcomes'],
+        score: 4,
+        next_question: null,
+        final_report: {
+          summary: 'A thoughtful interview with strong technical reasoning.',
+          overall_score: 4,
+          top_strengths: ['Clear technical reasoning'],
+          focus_areas: ['Quantify impact'],
+          next_steps: ['Practice concise STAR stories'],
+        },
+      });
+    }
+    return JSON.stringify({
+      feedback: `Specific feedback ${callNumber}.`,
+      strengths: ['Explains the decision'],
+      improvements: ['Add a concrete metric'],
+      score: 3,
+      next_question: `Adaptive follow-up ${callNumber}?`,
+      final_report: null,
+    });
+  };
+  const providerServices = {
+    db,
+    now: () => new Date().toISOString(),
+    text: value => typeof value === 'string' ? value.trim() : '',
+    ...aiProvider,
+    requestProviderCompletion,
+  };
+  aiApp.use('/api', createAIInterviewsRouter(providerServices));
+  aiApp.use('/api', createFinanceAIRouter(providerServices));
+  const aiServer = aiApp.listen(0, '127.0.0.1');
+  await new Promise((resolve, reject) => {
+    aiServer.once('listening', resolve);
+    aiServer.once('error', reject);
+  });
+  const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+  const aiJsonRequest = async (url, method = 'GET', body) => {
+    const response = await fetch(`${aiBaseUrl}${url}`, {
+      method,
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { response, result: await response.json() };
+  };
+  try {
+    await callback(aiJsonRequest, providerRequests);
+  } finally {
+    await new Promise(resolve => aiServer.close(resolve));
+  }
+}
+
 function archiveEntries(filePath) {
   return new Promise((resolve, reject) => {
     yauzl.open(filePath, { lazyEntries: true }, (error, archive) => {
@@ -185,7 +275,7 @@ test('question imports parse quoted CSV and JSON metadata safely', async () => {
 
 test('accounts, library search, recurring tasks, undo, and full media backup restore', async () => {
   ownerCookie = await createAccount('owner_test', 'test-password-1234');
-
+  const ownerUserId = db.prepare('SELECT id FROM users WHERE username=?').get('owner_test').id;
   const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
   const uploadResponse = await request('/api/images', {
     method: 'POST',
@@ -524,7 +614,6 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     answer: 'Missing question',
   }, ownerCookie)).response.status, 400);
   assert.equal((await jsonRequest(`/api/interviews/topics/${mockTopic.result.id}`, 'DELETE', {}, learningGuestCookie)).response.status, 404);
-  const ownerUserId = db.prepare('SELECT id FROM users WHERE username=?').get('owner_test').id;
   const bulkCardInsert = db.prepare(`INSERT INTO interview_cards(topic_id,user_id,question,answer,created_at,updated_at)
     VALUES (?,?,?,?,?,?)`);
   const bulkTimestamp = new Date().toISOString();
@@ -1043,6 +1132,9 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     type: 'insight',
     content: 'Backup insight',
   }, ownerCookie)).response.status, 201);
+  db.prepare(`INSERT INTO finance_ai_reports(user_id,month,scopes_json,report_json,created_at)
+    VALUES (?,?,?,?,?)`).run(ownerUserId, '2024-01', '["spending"]',
+    JSON.stringify({ overview: 'Finance report backup fixture.', observations: [], actions: [], watchouts: [] }), new Date().toISOString());
   const archiveResponse = await request('/api/backups', { method: 'POST', cookie: ownerCookie });
   assert.equal(archiveResponse.response.status, 201);
   assert.match(archiveResponse.result.filename, /\.zip$/);
@@ -1114,6 +1206,7 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(restoredFinance.result.budgets[0].category, 'Food');
   assert.ok(restoredFinance.result.subscriptions.some(subscription => subscription.name === 'Music'
     && subscription.next_renewal_date === '2024-02-29'));
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM finance_ai_reports WHERE user_id=?').get(ownerUserId).count, 1);
   const restoredFocus = await request('/api/focus', { cookie: ownerCookie });
   assert.equal(restoredFocus.result.total_xp, 25);
   assert.equal(restoredFocus.result.completed_sessions, 1);
@@ -1142,6 +1235,214 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(exportedData.books[0].progress[0].pages_read, 240);
   assert.equal(exportedData.meetings.length, 0);
   assert.equal(db.pragma('integrity_check')[0].integrity_check, 'ok');
+});
+
+test('AI interviewer encrypts provider keys, requires consent, saves private adaptive sessions, and reports early finishes', async () => {
+  const aiOwnerCookie = await createAccount('ai_owner_test', 'ai-owner-password-1234');
+  const aiOwnerId = db.prepare('SELECT id FROM users WHERE username=?').get('ai_owner_test').id;
+  const encryptionKey = process.env.PERSONAL_MEMO_AI_ENCRYPTION_KEY;
+  assert.equal(aiProvider.validateProviderBaseUrl('http://127.0.0.1:1234/v1').error !== undefined, true);
+  assert.equal(aiProvider.validateProviderBaseUrl('https://192.168.1.2/v1').error !== undefined, true);
+  await withAIHarness(aiOwnerId, async aiRequest => {
+    assert.equal((await aiRequest('/api/interviews/ai/connection')).result.configured, false);
+    assert.equal((await aiRequest('/api/interviews/ai/sessions', 'POST', {
+      role: 'Backend engineer',
+      interviewType: 'technical',
+      difficulty: 'intermediate',
+      questionLimit: 3,
+      shareDataConfirmed: true,
+    })).response.status, 409);
+    assert.equal((await aiRequest('/api/interviews/ai/connection', 'PUT', {
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      model: 'mock-model',
+      apiKey: 'never-save-this',
+    })).response.status, 400);
+    const savedConnection = await aiRequest('/api/interviews/ai/connection', 'PUT', {
+      baseUrl: 'https://api.example.com/v1',
+      model: 'mock-model',
+      apiKey: 'test-provider-secret',
+    });
+    assert.equal(savedConnection.response.status, 200);
+    assert.equal(savedConnection.result.configured, true);
+    assert.equal(savedConnection.result.keyConfigured, true);
+    assert.equal(Object.hasOwn(savedConnection.result, 'apiKey'), false);
+    const encryptedConnection = db.prepare('SELECT key_ciphertext,key_iv,key_auth_tag FROM user_ai_connections WHERE user_id=?')
+      .get(aiOwnerId);
+    assert.notEqual(encryptedConnection.key_ciphertext, 'test-provider-secret');
+    assert.equal(aiProvider.decryptSecret({
+      ciphertext: encryptedConnection.key_ciphertext,
+      iv: encryptedConnection.key_iv,
+      authTag: encryptedConnection.key_auth_tag,
+    }), 'test-provider-secret');
+    process.env.PERSONAL_MEMO_AI_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('hex');
+    assert.throws(() => aiProvider.decryptSecret({
+      ciphertext: encryptedConnection.key_ciphertext,
+      iv: encryptedConnection.key_iv,
+      authTag: encryptedConnection.key_auth_tag,
+    }));
+    process.env.PERSONAL_MEMO_AI_ENCRYPTION_KEY = encryptionKey;
+    assert.equal((await aiRequest('/api/interviews/ai/connection/test', 'POST', {})).result.ok, true);
+    const notConfirmed = await aiRequest('/api/interviews/ai/sessions', 'POST', {
+      role: 'Backend engineer',
+      interviewType: 'technical',
+      difficulty: 'intermediate',
+      questionLimit: 3,
+      shareDataConfirmed: false,
+    });
+    assert.equal(notConfirmed.response.status, 400);
+    const startedAI = await aiRequest('/api/interviews/ai/sessions', 'POST', {
+      role: 'Backend engineer',
+      interviewType: 'technical',
+      difficulty: 'intermediate',
+      questionLimit: 3,
+      shareJobDescription: true,
+      jobDescription: 'Design reliable APIs.',
+      shareResume: false,
+      resumeText: 'This must not be sent or stored.',
+      shareDataConfirmed: true,
+    });
+    assert.equal(startedAI.response.status, 201);
+    assert.equal(startedAI.result.currentQuestion, 'Tell me about a challenging project.');
+    let aiReply = await aiRequest(`/api/interviews/ai/sessions/${startedAI.result.id}/respond`, 'POST', {
+      answer: 'I redesigned a service to improve reliability.',
+    });
+    assert.equal(aiReply.response.status, 200);
+    assert.equal(aiReply.result.nextQuestion, 'Adaptive follow-up 1?');
+    aiReply = await aiRequest(`/api/interviews/ai/sessions/${startedAI.result.id}/respond`, 'POST', { answer: 'I used load tests and gradual rollout.' });
+    assert.equal(aiReply.result.completed, false);
+    aiReply = await aiRequest(`/api/interviews/ai/sessions/${startedAI.result.id}/respond`, 'POST', { answer: 'Latency improved by 30 percent.' });
+    assert.equal(aiReply.result.completed, true);
+    assert.equal(aiReply.result.report.overall_score, 4);
+    const aiHistory = await aiRequest(`/api/interviews/ai/sessions/${startedAI.result.id}`);
+    assert.equal(aiHistory.result.status, 'completed');
+    assert.equal(aiHistory.result.turns.length, 3);
+    assert.equal(aiHistory.result.turns[2].answer, 'Latency improved by 30 percent.');
+    assert.equal(aiHistory.result.report.top_strengths[0], 'Clear technical reasoning');
+    assert.equal(db.prepare('SELECT resume_text FROM ai_interview_sessions WHERE id=?').get(startedAI.result.id).resume_text, '');
+
+    const earlySession = await aiRequest('/api/interviews/ai/sessions', 'POST', {
+      role: 'Product manager',
+      interviewType: 'behavioral',
+      difficulty: 'beginner',
+      questionLimit: 5,
+      shareDataConfirmed: true,
+    });
+    assert.equal(earlySession.response.status, 201);
+    assert.equal((await aiRequest(`/api/interviews/ai/sessions/${earlySession.result.id}/respond`, 'POST', {
+      answer: 'I aligned the team around a clear outcome.',
+    })).response.status, 200);
+    const earlyReport = await aiRequest(`/api/interviews/ai/sessions/${earlySession.result.id}/finish`, 'POST', {});
+    assert.equal(earlyReport.response.status, 200);
+    assert.equal(earlyReport.result.completed, true);
+    assert.equal(earlyReport.result.report.overall_score, 3);
+    const earlyHistory = await aiRequest(`/api/interviews/ai/sessions/${earlySession.result.id}`);
+    assert.equal(earlyHistory.result.turns.length, 2);
+    assert.equal(earlyHistory.result.turns[1].answer, '');
+
+    const aiOtherCookie = await createAccount('ai_other_test', 'ai-other-password-1234');
+    const aiOtherId = db.prepare('SELECT id FROM users WHERE username=?').get('ai_other_test').id;
+    await withAIHarness(aiOtherId, async otherRequest => {
+      assert.equal((await otherRequest('/api/interviews/ai/connection')).result.configured, false);
+      assert.equal((await otherRequest(`/api/interviews/ai/sessions/${startedAI.result.id}`)).response.status, 404);
+    });
+    assert.ok(aiOtherCookie);
+    assert.equal((await aiRequest(`/api/interviews/ai/sessions/${startedAI.result.id}`, 'DELETE')).response.status, 200);
+    assert.equal((await aiRequest(`/api/interviews/ai/sessions/${earlySession.result.id}`, 'DELETE')).response.status, 200);
+    assert.equal((await aiRequest('/api/interviews/ai/connection', 'DELETE')).response.status, 200);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM user_ai_connections WHERE user_id=?').get(aiOwnerId).count, 0);
+  });
+  assert.ok(aiOwnerCookie);
+});
+
+test('finance AI requires consent, analyzes aggregate data, saves private reports, and respects account ownership', async () => {
+  const financeCookie = await createAccount('finance_ai_test', 'finance-ai-password-1234');
+  const financeUserId = db.prepare('SELECT id FROM users WHERE username=?').get('finance_ai_test').id;
+  const expenses = await jsonRequest('/api/finance/transactions', 'POST', {
+    type: 'expense',
+    description: 'Private health appointment',
+    amount: 85.75,
+    category: 'Health',
+    transaction_date: '2024-01-15',
+    notes: 'Sensitive personal note must not reach the AI provider.',
+  }, financeCookie);
+  assert.equal(expenses.response.status, 201);
+  assert.equal((await jsonRequest('/api/finance/transactions', 'POST', {
+    type: 'income',
+    description: 'Salary',
+    amount: 2500,
+    category: 'Work',
+    transaction_date: '2024-01-01',
+  }, financeCookie)).response.status, 201);
+  assert.equal((await jsonRequest('/api/finance/budgets', 'PUT', {
+    month: '2024-01',
+    category: 'Health',
+    amount: 100,
+  }, financeCookie)).response.status, 200);
+  assert.equal((await jsonRequest('/api/finance/subscriptions', 'POST', {
+    name: 'Study app',
+    amount: 12,
+    billing_cycle: 'monthly',
+    next_renewal_date: '2024-02-05',
+    category: 'Education',
+  }, financeCookie)).response.status, 201);
+  const financeData = await request('/api/finance?month=2024-01', { cookie: financeCookie });
+  assert.equal(financeData.response.status, 200);
+  assert.equal(financeData.result.trends.length, 6);
+  assert.equal(financeData.result.trends.at(-1).income, 2500);
+  assert.equal(financeData.result.trends.at(-1).expenses, 85.75);
+
+  await withAIHarness(financeUserId, async (financeRequest, providerRequests) => {
+    assert.equal((await financeRequest('/api/finance/ai/reports')).result.configured, false);
+    assert.equal((await financeRequest('/api/finance/ai/analyze', 'POST', {
+      month: '2024-01',
+      scopes: ['spending', 'budgets', 'subscriptions', 'cashflow'],
+      confirmDataSharing: true,
+    })).response.status, 409);
+    assert.equal((await financeRequest('/api/interviews/ai/connection', 'PUT', {
+      baseUrl: 'https://api.example.com/v1',
+      model: 'mock-model',
+      apiKey: 'finance-test-provider-secret',
+    })).response.status, 200);
+    const scopes = ['spending', 'budgets', 'subscriptions', 'cashflow'];
+    assert.equal((await financeRequest('/api/finance/ai/analyze', 'POST', {
+      month: '2024-01',
+      scopes,
+      confirmDataSharing: false,
+    })).response.status, 400);
+    assert.equal((await financeRequest('/api/finance/ai/analyze', 'POST', {
+      month: '2024-01',
+      scopes: ['spending', 'unknown'],
+      confirmDataSharing: true,
+    })).response.status, 400);
+    const analysis = await financeRequest('/api/finance/ai/analyze', 'POST', {
+      month: '2024-01',
+      scopes,
+      confirmDataSharing: true,
+    });
+    assert.equal(analysis.response.status, 201, JSON.stringify(analysis.result));
+    assert.equal(analysis.result.report.observations.length, 1);
+    assert.equal(analysis.result.report.actions[0].priority, 'medium');
+    const aiPayload = JSON.parse(providerRequests.at(-1));
+    const aggregatedData = JSON.stringify(aiPayload.finance_data);
+    assert.match(aggregatedData, /Health/);
+    assert.match(aggregatedData, /Study app/);
+    assert.doesNotMatch(aggregatedData, /Private health appointment|Sensitive personal note/);
+    assert.equal(aiPayload.finance_data.monthlyTotals.at(-1).income, 2500);
+    assert.equal(aiPayload.finance_data.budgetProgress[0].spent, 85.75);
+    const history = await financeRequest('/api/finance/ai/reports');
+    assert.equal(history.result.reports.length, 1);
+    assert.equal(history.result.reports[0].id, analysis.result.id);
+
+    const otherCookie = await createAccount('finance_ai_other', 'finance-ai-other-password-1234');
+    const otherUserId = db.prepare('SELECT id FROM users WHERE username=?').get('finance_ai_other').id;
+    await withAIHarness(otherUserId, async otherRequest => {
+      assert.equal((await otherRequest('/api/finance/ai/reports')).result.reports.length, 0);
+      assert.equal((await otherRequest(`/api/finance/ai/reports/${analysis.result.id}`, 'DELETE')).response.status, 404);
+    });
+    assert.ok(otherCookie);
+    assert.equal((await financeRequest(`/api/finance/ai/reports/${analysis.result.id}`, 'DELETE')).response.status, 200);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM finance_ai_reports WHERE user_id=?').get(financeUserId).count, 0);
+  });
 });
 
 test('search results and owner backup controls remain account-scoped', async () => {

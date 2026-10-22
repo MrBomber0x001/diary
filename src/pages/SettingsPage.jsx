@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { messages } from '../i18n.js';
+import AIConnectionSettings from '../components/AIConnectionSettings.jsx';
 
 export default function SettingsPage({ language, onLanguageChange, onThemeChange, onUnauthorized }) {
   const [settings, setSettings] = useState(null);
@@ -106,6 +107,7 @@ export default function SettingsPage({ language, onLanguageChange, onThemeChange
         <label>مدة الاستراحة (دقيقة)<input name="focusBreakMinutes" type="number" min="1" max="90" defaultValue={settings.focusBreakMinutes} /></label>
         <div className="editor-actions"><button className="button button-primary">{t.save}</button></div>
       </form>
+      <AIConnectionSettings language={language} onUnauthorized={onUnauthorized} />
       {settings.isOwner && <section className="backup-settings">
         <h2>النسخ الاحتياطية</h2>
         <button className="button button-primary" onClick={createBackup}>إنشاء نسخة احتياطية الآن</button>

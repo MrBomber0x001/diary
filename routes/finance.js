@@ -98,6 +98,25 @@ function createFinanceRouter({ db, text, now, localToday }) {
       COALESCE(SUM(CASE WHEN type='expense' THEN amount_minor ELSE 0 END),0) AS expense_minor
       FROM finance_transactions WHERE user_id=? AND currency=? AND transaction_date BETWEEN ? AND ?`)
       .get(userId, currency, ...bounds);
+    const [year, monthNumber] = month.split('-').map(Number);
+    const firstTrendMonth = new Date(Date.UTC(year, monthNumber - 6, 1));
+    const trendMonths = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(Date.UTC(year, monthNumber - 6 + index, 1));
+      return date.toISOString().slice(0, 7);
+    });
+    const trendRows = db.prepare(`SELECT substr(transaction_date,1,7) AS month,
+      SUM(CASE WHEN type='income' THEN amount_minor ELSE 0 END) AS income_minor,
+      SUM(CASE WHEN type='expense' THEN amount_minor ELSE 0 END) AS expense_minor
+      FROM finance_transactions WHERE user_id=? AND currency=? AND transaction_date BETWEEN ? AND ?
+      GROUP BY substr(transaction_date,1,7)`)
+      .all(userId, currency, firstTrendMonth.toISOString().slice(0, 10), `${month}-31`);
+    const trendByMonth = new Map(trendRows.map(row => [row.month, row]));
+    const trends = trendMonths.map(value => {
+      const row = trendByMonth.get(value);
+      const income = row?.income_minor || 0;
+      const expenses = row?.expense_minor || 0;
+      return { month: value, income: income / 100, expenses: expenses / 100, balance: (income - expenses) / 100 };
+    });
     const subscriptions = db.prepare(`SELECT id,name,amount_minor,currency,billing_cycle,next_renewal_date,
       category,notes,status,created_at,updated_at FROM finance_subscriptions
       WHERE user_id=? ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,next_renewal_date,id`)
@@ -133,6 +152,7 @@ function createFinanceRouter({ db, text, now, localToday }) {
       transactions,
       subscriptions,
       budgets,
+      trends,
     });
 
   });

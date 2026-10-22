@@ -4,6 +4,7 @@ import { messages } from '../i18n.js';
 import { useLocation } from '../navigation.jsx';
 import Editor from '../components/Editor.jsx';
 import ActionIcon from '../components/ActionIcon.jsx';
+import AIInterviewer from '../components/AIInterviewer.jsx';
 import CollectionPage from './CollectionPage.jsx';
 import { collections } from './collections.js';
 import { parseQuestionImport } from '../question-import.mjs';
@@ -33,7 +34,7 @@ const roundFields = [
 
 export default function InterviewPage({ language, onUnauthorized }) {
   const location = useLocation();
-  const [section, setSection] = useState('applications');
+  const [section, setSection] = useState('ai');
   const [topics, setTopics] = useState([]);
   const [topic, setTopic] = useState(null);
   const [application, setApplication] = useState(null);
@@ -479,12 +480,13 @@ export default function InterviewPage({ language, onUnauthorized }) {
     <section className="page-card">
       <header className="page-heading"><div><p className="eyebrow">CAREER WORKSPACE</p><h1>{t.interviews}</h1><p>نظّم فرصك، واستعد للمقابلة بخطة واضحة.</p></div></header>
       <div className="interview-tabs" role="tablist" aria-label="أقسام المقابلات">
-        <button role="tab" aria-selected={section === 'applications'} className={`interview-tab ${section === 'applications' ? 'active' : ''}`} onClick={() => setSection('applications')}><span aria-hidden="true">▣</span> طلبات التوظيف</button>
-        <button role="tab" aria-selected={section === 'cards'} className={`interview-tab ${section === 'cards' ? 'active' : ''}`} onClick={() => setSection('cards')}><span aria-hidden="true">✧</span> محاكاة المقابلات</button>
+        <button role="tab" aria-selected={section === 'ai'} className={`interview-tab interview-tab-ai ${section === 'ai' ? 'active' : ''}`} onClick={() => setSection('ai')}><span aria-hidden="true">✦</span> {language === 'ar' ? 'المحاور الذكي' : 'AI interviewer'}</button>
+        <button role="tab" aria-selected={section === 'cards'} className={`interview-tab ${section === 'cards' ? 'active' : ''}`} onClick={() => setSection('cards')}><span aria-hidden="true">✧</span> {language === 'ar' ? 'بنك الأسئلة' : 'Question bank'}</button>
+        <button role="tab" aria-selected={section === 'applications'} className={`interview-tab ${section === 'applications' ? 'active' : ''}`} onClick={() => setSection('applications')}><span aria-hidden="true">▣</span> {language === 'ar' ? 'طلبات التوظيف' : 'Applications'}</button>
       </div>
       {error && <p className="notice error" role="alert">{error}</p>}
     </section>
-    {section === 'applications' ? application ? <section className="page-card application-detail">
+    {section === 'ai' ? <AIInterviewer language={language} onUnauthorized={onUnauthorized} /> : section === 'applications' ? application ? <section className="page-card application-detail">
       <header className="page-heading"><div><button className="button button-quiet" onClick={() => { setApplication(null); setEditingRound(null); }}>← العودة للطلبات</button><p className="eyebrow">APPLICATION DETAILS</p><h2>{application.company}</h2><p>{application.role} · {application.applied_on || ''}</p></div>
         <span className={`application-status ${application.status}`}>{({ applied: 'تم التقديم', screening: 'فرز أولي', interviewing: 'مقابلات', offer: 'عرض وظيفي', rejected: 'مرفوض', withdrawn: 'منسحب' })[application.status] || application.status}</span></header>
       {application.job_url && <a href={application.job_url} target="_blank" rel="noreferrer">رابط الوظيفة</a>}

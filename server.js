@@ -13,6 +13,13 @@ const net = require('node:net');
 const { DeleteObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } = require('@aws-sdk/client-s3');
 const registerApiRoutes = require('./routes');
 const createAuthRouter = require('./routes/auth');
+const {
+  decryptSecret,
+  encryptSecret,
+  encryptionConfigured,
+  requestProviderCompletion,
+  validateProviderBaseUrl,
+} = require('./lib/ai-provider');
 
 const app = express();
 const PORT = Number(process.env.PORT || 4178);
@@ -608,6 +615,53 @@ db.exec(`
     created_at TEXT NOT NULL,
     UNIQUE(session_id,card_id)
   );
+  CREATE TABLE IF NOT EXISTS user_ai_connections (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    base_url TEXT NOT NULL,
+    model TEXT NOT NULL,
+    key_ciphertext TEXT NOT NULL,
+    key_iv TEXT NOT NULL,
+    key_auth_tag TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS ai_interview_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    interview_type TEXT NOT NULL CHECK (interview_type IN ('behavioral','technical','system_design','mixed')),
+    difficulty TEXT NOT NULL CHECK (difficulty IN ('beginner','intermediate','advanced')),
+    question_limit INTEGER NOT NULL CHECK (question_limit BETWEEN 3 AND 8),
+    job_description TEXT NOT NULL DEFAULT '',
+    resume_text TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
+    report_json TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS ai_interview_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES ai_interview_sessions(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position > 0),
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL DEFAULT '',
+    feedback TEXT NOT NULL DEFAULT '',
+    strengths_json TEXT NOT NULL DEFAULT '[]',
+    improvements_json TEXT NOT NULL DEFAULT '[]',
+    score INTEGER CHECK (score IS NULL OR score BETWEEN 1 AND 5),
+    answered_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id,position)
+  );
+  CREATE TABLE IF NOT EXISTS finance_ai_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    month TEXT NOT NULL,
+    scopes_json TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 for (const [column, definition] of [
   ['answer_notes', "TEXT NOT NULL DEFAULT ''"],
@@ -656,6 +710,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_interview_cards_topic ON interview_cards(topic_id,user_id,id);
   CREATE INDEX IF NOT EXISTS idx_interview_practice_topic ON interview_practice_sessions(topic_id,user_id,started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_interview_practice_card ON interview_practice_responses(card_id,user_id,created_at DESC,id DESC);
+  CREATE INDEX IF NOT EXISTS idx_ai_interview_sessions_user ON ai_interview_sessions(user_id,started_at DESC,id DESC);
+  CREATE INDEX IF NOT EXISTS idx_ai_interview_turns_session ON ai_interview_turns(session_id,user_id,position);
+  CREATE INDEX IF NOT EXISTS idx_finance_ai_reports_user ON finance_ai_reports(user_id,created_at DESC,id DESC);
 `);
 db.prepare("INSERT OR IGNORE INTO application_settings(key,value) VALUES ('daily_backup_enabled','1')").run();
 for (const [key, value] of [
@@ -1127,6 +1184,10 @@ const restoreTables = [
   'interview_cards',
   'interview_practice_sessions',
   'interview_practice_responses',
+  'user_ai_connections',
+  'ai_interview_sessions',
+  'ai_interview_turns',
+  'finance_ai_reports',
   'book_clubs',
   'book_club_members',
   'book_club_invites',
@@ -1181,7 +1242,8 @@ function restoreDatabaseFrom(filePath, sourceTables) {
       const deleteOrder = ['sessions', 'learning_files', 'learning_notes', 'learning_topics',
         'finance_transactions', 'finance_budgets', 'finance_subscriptions',
         'progress_events', 'chapters', 'audio_attachments', 'image_attachments',
-        'habit_logs', 'routine_logs', 'focus_sessions', 'interview_practice_responses', 'interview_practice_sessions',
+        'habit_logs', 'routine_logs', 'focus_sessions', 'finance_ai_reports', 'ai_interview_turns', 'ai_interview_sessions', 'user_ai_connections',
+        'interview_practice_responses', 'interview_practice_sessions',
         'interview_cards', 'interview_rounds', 'interview_topics', 'interview_applications', 'todos', 'calendar_events', 'saved_articles', 'routines', 'habits',
         'book_club_message_attachments', 'book_club_message_links', 'book_club_notifications',
         'book_club_meetings', 'book_club_messages', 'book_club_progress', 'book_club_books',
@@ -1607,6 +1669,16 @@ registerApiRoutes(app, {
   planning: { db, now, validateArea, validateGoal, validateProject, ownedArea, ownedGoal, ownedProject },
   activity: { db, now, text, localToday, localTime, validDate },
   interviews: { db, now, text, validDate },
+  aiInterviews: {
+    db,
+    now,
+    text,
+    encryptSecret,
+    decryptSecret,
+    encryptionConfigured,
+    requestProviderCompletion,
+    validateProviderBaseUrl,
+  },
   tasks: { db, now, validateTodo, nextDueDate, createUndoableDelete },
   notes: {
     db,
@@ -1627,6 +1699,7 @@ registerApiRoutes(app, {
   },
   learning: { db, text, now, fs, path, crypto, multer, learningUploadDir: LEARNING_UPLOAD_DIR },
   finance: { db, text, now, localToday },
+  financeAI: { db, now, text, decryptSecret, encryptionConfigured, requestProviderCompletion },
   bookClubs: {
     db,
     text,
