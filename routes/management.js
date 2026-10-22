@@ -7,10 +7,11 @@ const fs = require('node:fs');
 function createManagementRouter({
   db, text, now, requireOwner, getS3Settings, backupFiles, backupRetention, validateS3Settings, testS3Connection,
   scheduleDailyBackup, clearBackupTimer, createBackupOnce, S3StorageError, backupDir, uploadDir, audioDir,
-  clubUploadDir, isBackupInProgress, extractCompleteBackup, validateBackupDatabase, BackupValidationError,
+  clubUploadDir, learningUploadDir, isBackupInProgress, extractCompleteBackup, validateBackupDatabase, BackupValidationError,
   restoreDatabaseFrom, swapRestoredMedia, clearSessionCookie,
 }) {
   const router = express.Router();
+  const supportedCurrencies = new Set(['AED', 'EGP', 'EUR', 'GBP', 'KWD', 'QAR', 'SAR', 'USD']);
   router.post('/trash/:token/restore', (req, res) => {
     if (!/^[a-f0-9]{48}$/.test(req.params.token)) return res.status(404).json({ error: 'تعذّر استعادة العنصر.' });
     const entry = db.prepare('SELECT * FROM undo_trash WHERE token=? AND user_id=? AND expires_at>?')
@@ -51,7 +52,8 @@ function createManagementRouter({
   router.get('/settings', (req, res) => {
     const preference = db.prepare(`SELECT edit_mode,notification_enabled,theme_mode,reminder_minutes,
       notification_sound_enabled,markdown_rendering_enabled,markdown_toolbar_enabled,markdown_image_paste_enabled,
-      font_size_offset,line_spacing,font_family
+      font_size_offset,line_spacing,font_family,language,prayer_latitude,prayer_longitude,prayer_location,prayer_method,
+      finance_currency,shortcut_todo,shortcut_daily_note,shortcut_read_later,shortcut_quick_create
       FROM user_preferences WHERE user_id=?`).get(req.user.id);
     const isOwner = Boolean(db.prepare('SELECT is_owner FROM users WHERE id=?').get(req.user.id)?.is_owner);
     const cloud = getS3Settings();
@@ -67,6 +69,18 @@ function createManagementRouter({
       fontSizeOffset: preference?.font_size_offset ?? 0,
       lineSpacing: preference?.line_spacing || 'comfortable',
       fontFamily: preference?.font_family || 'plex',
+      language: preference?.language || 'ar',
+      prayerLatitude: preference?.prayer_latitude ?? null,
+      prayerLongitude: preference?.prayer_longitude ?? null,
+      prayerLocation: preference?.prayer_location || '',
+      prayerMethod: preference?.prayer_method || 5,
+      financeCurrency: preference?.finance_currency || 'EGP',
+      shortcuts: {
+        todo: preference?.shortcut_todo || 'Ctrl+Alt+Shift+KeyT',
+        dailyNote: preference?.shortcut_daily_note || 'Ctrl+Alt+Shift+KeyD',
+        readLater: preference?.shortcut_read_later || 'Ctrl+Alt+Shift+KeyR',
+        quickCreate: preference?.shortcut_quick_create || 'Ctrl+Alt+Shift+KeyQ',
+      },
       isOwner,
       dailyBackupEnabled: isOwner
         ? db.prepare("SELECT value FROM application_settings WHERE key='daily_backup_enabled'").get().value === '1'
@@ -120,6 +134,36 @@ function createManagementRouter({
     const fontFamily = Object.prototype.hasOwnProperty.call(req.body || {}, 'fontFamily')
       ? text(req.body.fontFamily)
       : existingPreference?.font_family || 'plex';
+    const language = Object.prototype.hasOwnProperty.call(req.body || {}, 'language')
+      ? text(req.body.language)
+      : existingPreference?.language || 'ar';
+    const prayerLatitude = Object.prototype.hasOwnProperty.call(req.body || {}, 'prayerLatitude')
+      ? req.body.prayerLatitude === '' || req.body.prayerLatitude === null ? null : Number(req.body.prayerLatitude)
+      : existingPreference?.prayer_latitude ?? null;
+    const prayerLongitude = Object.prototype.hasOwnProperty.call(req.body || {}, 'prayerLongitude')
+      ? req.body.prayerLongitude === '' || req.body.prayerLongitude === null ? null : Number(req.body.prayerLongitude)
+      : existingPreference?.prayer_longitude ?? null;
+    const prayerLocation = Object.prototype.hasOwnProperty.call(req.body || {}, 'prayerLocation')
+      ? text(req.body.prayerLocation)
+      : existingPreference?.prayer_location || '';
+    const prayerMethod = Object.prototype.hasOwnProperty.call(req.body || {}, 'prayerMethod')
+      ? Number(req.body.prayerMethod)
+      : existingPreference?.prayer_method || 5;
+    const financeCurrency = Object.prototype.hasOwnProperty.call(req.body || {}, 'financeCurrency')
+      ? text(req.body.financeCurrency)
+      : existingPreference?.finance_currency || 'EGP';
+    const shortcutKeys = ['todo', 'dailyNote', 'readLater', 'quickCreate'];
+    const shortcutDefaults = {
+      todo: 'Ctrl+Alt+Shift+KeyT',
+      dailyNote: 'Ctrl+Alt+Shift+KeyD',
+      readLater: 'Ctrl+Alt+Shift+KeyR',
+      quickCreate: 'Ctrl+Alt+Shift+KeyQ',
+    };
+    const shortcuts = Object.fromEntries(shortcutKeys.map(key => {
+      const column = `shortcut_${key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)}`;
+      return [key, req.body?.shortcuts?.[key] ?? existingPreference?.[column] ?? shortcutDefaults[key]];
+    }));
+    const validShortcutPattern = /^(?:Ctrl\+|Alt\+|Shift\+|Meta\+)*(?:Key[A-Z0-9]|[A-Z0-9])$/;
     if (!['inline', 'popup'].includes(editMode)) {
       return res.status(400).json({ error: 'اختر طريقة تعديل صحيحة.' });
     }
@@ -128,8 +172,17 @@ function createManagementRouter({
       || ![-1, 0, 1, 2].includes(fontSizeOffset)
       || !['compact', 'comfortable', 'relaxed'].includes(lineSpacing)
       || !['plex', 'system', 'serif'].includes(fontFamily)
+      || !['ar', 'en'].includes(language)
+      || (prayerLatitude !== null && (!Number.isFinite(prayerLatitude) || prayerLatitude < -90 || prayerLatitude > 90))
+      || (prayerLongitude !== null && (!Number.isFinite(prayerLongitude) || prayerLongitude < -180 || prayerLongitude > 180))
+      || ((prayerLatitude === null) !== (prayerLongitude === null))
+      || prayerLocation.length > 120
+      || ![3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(prayerMethod)
+      || !supportedCurrencies.has(financeCurrency)
+      || Object.values(shortcuts).some(value => typeof value !== 'string' || (value && !validShortcutPattern.test(value)))
+      || new Set(Object.values(shortcuts).filter(Boolean)).size !== Object.values(shortcuts).filter(Boolean).length
       || Object.values(preferenceBooleans).some(value => typeof value !== 'boolean')) {
-      return res.status(400).json({ error: 'تحقق من إعدادات المظهر والتنبيهات.' });
+      return res.status(400).json({ error: 'تحقق من إعدادات المظهر والتنبيهات والموقع وطريقة الحساب.' });
     }
     const hasBackupSetting = Object.prototype.hasOwnProperty.call(req.body || {}, 'dailyBackupEnabled');
     let enabled;
@@ -168,18 +221,24 @@ function createManagementRouter({
     }
     db.prepare(`INSERT INTO user_preferences(user_id,edit_mode,notification_enabled,theme_mode,reminder_minutes,
       notification_sound_enabled,markdown_rendering_enabled,markdown_toolbar_enabled,markdown_image_paste_enabled,
-      font_size_offset,line_spacing,font_family)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      font_size_offset,line_spacing,font_family,shortcut_todo,shortcut_daily_note,shortcut_read_later,shortcut_quick_create,language,
+      prayer_latitude,prayer_longitude,prayer_location,prayer_method,finance_currency)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(user_id) DO UPDATE SET edit_mode=excluded.edit_mode,
         notification_enabled=excluded.notification_enabled,theme_mode=excluded.theme_mode,
         reminder_minutes=excluded.reminder_minutes,notification_sound_enabled=excluded.notification_sound_enabled,
         markdown_rendering_enabled=excluded.markdown_rendering_enabled,markdown_toolbar_enabled=excluded.markdown_toolbar_enabled,
         markdown_image_paste_enabled=excluded.markdown_image_paste_enabled,font_size_offset=excluded.font_size_offset,
-        line_spacing=excluded.line_spacing,font_family=excluded.font_family`)
+        line_spacing=excluded.line_spacing,font_family=excluded.font_family,shortcut_todo=excluded.shortcut_todo,
+        shortcut_daily_note=excluded.shortcut_daily_note,shortcut_read_later=excluded.shortcut_read_later,
+        shortcut_quick_create=excluded.shortcut_quick_create,language=excluded.language,
+        prayer_latitude=excluded.prayer_latitude,prayer_longitude=excluded.prayer_longitude,
+        prayer_location=excluded.prayer_location,prayer_method=excluded.prayer_method,finance_currency=excluded.finance_currency`)
       .run(req.user.id, editMode, Number(notificationsEnabled), themeMode, reminderMinutes,
         Number(preferenceBooleans.notificationSoundEnabled), Number(preferenceBooleans.markdownRenderingEnabled),
         Number(preferenceBooleans.markdownToolbarEnabled), Number(preferenceBooleans.markdownImagePasteEnabled),
-        fontSizeOffset, lineSpacing, fontFamily);
+        fontSizeOffset, lineSpacing, fontFamily, shortcuts.todo, shortcuts.dailyNote,
+        shortcuts.readLater, shortcuts.quickCreate, language, prayerLatitude, prayerLongitude, prayerLocation, prayerMethod, financeCurrency);
     if (hasBackupSetting) {
       db.prepare("UPDATE application_settings SET value=? WHERE key='daily_backup_enabled'").run(enabled ? '1' : '0');
       if (enabled) scheduleDailyBackup();
@@ -289,6 +348,7 @@ function createManagementRouter({
       let uploadSwap;
       let audioSwap;
       let clubUploadSwap;
+      let learningUploadSwap;
       try {
         if (isBackupInProgress()) {
           return res.status(409).json({ error: 'انتظر انتهاء النسخة الاحتياطية الحالية ثم أعد المحاولة.' });
@@ -299,15 +359,18 @@ function createManagementRouter({
         fs.mkdirSync(path.join(stagingDirectory, 'uploads'), { recursive: true });
         fs.mkdirSync(path.join(stagingDirectory, 'audio'), { recursive: true });
         fs.mkdirSync(path.join(stagingDirectory, 'club-uploads'), { recursive: true });
+        fs.mkdirSync(path.join(stagingDirectory, 'learning-uploads'), { recursive: true });
         const safetyBackup = await createBackupOnce();
         clearBackupTimer();
         uploadSwap = swapRestoredMedia(path.join(stagingDirectory, 'uploads'), uploadDir);
         audioSwap = swapRestoredMedia(path.join(stagingDirectory, 'audio'), audioDir);
         clubUploadSwap = swapRestoredMedia(path.join(stagingDirectory, 'club-uploads'), clubUploadDir);
+        learningUploadSwap = swapRestoredMedia(path.join(stagingDirectory, 'learning-uploads'), learningUploadDir);
         restoreDatabaseFrom(databasePath, tables);
         uploadSwap.commit();
         audioSwap.commit();
         clubUploadSwap.commit();
+        learningUploadSwap.commit();
         clearSessionCookie(res);
         res.json({
           ok: true,
@@ -317,7 +380,7 @@ function createManagementRouter({
         scheduleDailyBackup(1000);
       } catch (restoreError) {
         const rollbackErrors = [];
-        for (const mediaSwap of [clubUploadSwap, audioSwap, uploadSwap]) {
+        for (const mediaSwap of [learningUploadSwap, clubUploadSwap, audioSwap, uploadSwap]) {
           if (!mediaSwap) continue;
           try {
             mediaSwap.rollback();

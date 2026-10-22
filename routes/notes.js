@@ -53,7 +53,7 @@ function createNotesRouter({
   });
 
   router.get('/bookmarks', (req, res) => {
-    res.json(db.prepare(`SELECT id,title,url,note,image_url,created_at,updated_at FROM bookmarks
+    res.json(db.prepare(`SELECT id,title,url,note,image_url,category,created_at,updated_at FROM bookmarks
       WHERE user_id=? AND deleted_at IS NULL ORDER BY updated_at DESC,id DESC`).all(req.user.id));
   });
 
@@ -64,9 +64,10 @@ function createNotesRouter({
       path.basename(bookmark.image_url), req.user.id,
     )) return res.status(400).json({ error: 'صورة المعاينة غير موجودة في حسابك.' });
     const timestamp = now();
-    const result = db.prepare(`INSERT INTO bookmarks(user_id,title,url,note,image_url,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?)`).run(req.user.id, bookmark.title, bookmark.url, bookmark.note, bookmark.image_url, timestamp, timestamp);
-    res.status(201).json(db.prepare(`SELECT id,title,url,note,image_url,created_at,updated_at FROM bookmarks WHERE id=?`)
+    const result = db.prepare(`INSERT INTO bookmarks(user_id,title,url,note,image_url,category,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?)`).run(req.user.id, bookmark.title, bookmark.url, bookmark.note, bookmark.image_url,
+      bookmark.category || 'عام', timestamp, timestamp);
+    res.status(201).json(db.prepare(`SELECT id,title,url,note,image_url,category,created_at,updated_at FROM bookmarks WHERE id=?`)
       .get(result.lastInsertRowid));
   });
 
@@ -79,13 +80,59 @@ function createNotesRouter({
     if (bookmark.image_url && !db.prepare('SELECT 1 FROM image_attachments WHERE filename=? AND user_id=?').get(
       path.basename(bookmark.image_url), req.user.id,
     )) return res.status(400).json({ error: 'صورة المعاينة غير موجودة في حسابك.' });
-    db.prepare('UPDATE bookmarks SET title=?,url=?,note=?,image_url=?,updated_at=? WHERE id=? AND user_id=?')
-      .run(bookmark.title, bookmark.url, bookmark.note, bookmark.image_url, now(), existing.id, req.user.id);
-    res.json(db.prepare(`SELECT id,title,url,note,image_url,created_at,updated_at FROM bookmarks WHERE id=?`).get(existing.id));
+    db.prepare('UPDATE bookmarks SET title=?,url=?,note=?,image_url=?,category=?,updated_at=? WHERE id=? AND user_id=?')
+      .run(bookmark.title, bookmark.url, bookmark.note, bookmark.image_url, bookmark.category || 'عام',
+        now(), existing.id, req.user.id);
+    res.json(db.prepare(`SELECT id,title,url,note,image_url,category,created_at,updated_at FROM bookmarks WHERE id=?`).get(existing.id));
   });
 
   router.delete('/bookmarks/:id', (req, res) => {
     createUndoableDelete('bookmark', 'bookmarks', req.params.id, req.user.id, res);
+  });
+
+  router.get('/snippets', (req, res) => {
+    res.json(db.prepare(`SELECT id,title,language,description,code,created_at,updated_at FROM code_snippets
+      WHERE user_id=? ORDER BY updated_at DESC,id DESC`).all(req.user.id));
+  });
+
+  router.post('/snippets', (req, res) => {
+    const title = text(req.body?.title);
+    const language = text(req.body?.language);
+    const description = text(req.body?.description);
+    const code = typeof req.body?.code === 'string' ? req.body.code : '';
+    if (!title || title.length > 160 || language.length > 40 || description.length > 1000
+      || !code.trim() || code.length > 30000) {
+      return res.status(400).json({ error: 'أدخل عنواناً (حتى ١٦٠ حرفاً) ومقطعاً برمجياً (حتى ٣٠٠٠٠ حرف)، وتحقق من الحقول الأخرى.' });
+    }
+    const timestamp = now();
+    const result = db.prepare(`INSERT INTO code_snippets(user_id,title,language,description,code,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?)`).run(req.user.id, title, language, description, code, timestamp, timestamp);
+    res.status(201).json(db.prepare(`SELECT id,title,language,description,code,created_at,updated_at
+      FROM code_snippets WHERE id=? AND user_id=?`).get(result.lastInsertRowid, req.user.id));
+  });
+
+  router.put('/snippets/:id', (req, res) => {
+    const existing = db.prepare('SELECT id FROM code_snippets WHERE id=? AND user_id=?')
+      .get(req.params.id, req.user.id);
+    if (!existing) return res.status(404).json({ error: 'المقطع البرمجي غير موجود.' });
+    const title = text(req.body?.title);
+    const language = text(req.body?.language);
+    const description = text(req.body?.description);
+    const code = typeof req.body?.code === 'string' ? req.body.code : '';
+    if (!title || title.length > 160 || language.length > 40 || description.length > 1000
+      || !code.trim() || code.length > 30000) {
+      return res.status(400).json({ error: 'أدخل عنواناً (حتى ١٦٠ حرفاً) ومقطعاً برمجياً (حتى ٣٠٠٠٠ حرف)، وتحقق من الحقول الأخرى.' });
+    }
+    db.prepare(`UPDATE code_snippets SET title=?,language=?,description=?,code=?,updated_at=?
+      WHERE id=? AND user_id=?`).run(title, language, description, code, now(), existing.id, req.user.id);
+    res.json(db.prepare(`SELECT id,title,language,description,code,created_at,updated_at FROM code_snippets
+      WHERE id=? AND user_id=?`).get(existing.id, req.user.id));
+  });
+
+  router.delete('/snippets/:id', (req, res) => {
+    const result = db.prepare('DELETE FROM code_snippets WHERE id=? AND user_id=?').run(req.params.id, req.user.id);
+    if (!result.changes) return res.status(404).json({ error: 'المقطع البرمجي غير موجود.' });
+    res.json({ ok: true });
   });
 
   router.get('/daily-notes', (req, res) => {

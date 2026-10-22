@@ -23,6 +23,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const UPLOAD_DIR = path.resolve(process.env.PERSONAL_MEMO_UPLOAD_DIR || path.join(DATA_DIR, 'uploads'));
 const AUDIO_DIR = path.resolve(process.env.PERSONAL_MEMO_AUDIO_DIR || path.join(DATA_DIR, 'audio'));
 const CLUB_UPLOAD_DIR = path.resolve(process.env.PERSONAL_MEMO_CLUB_UPLOAD_DIR || path.join(DATA_DIR, 'club-uploads'));
+const LEARNING_UPLOAD_DIR = path.resolve(process.env.PERSONAL_MEMO_LEARNING_UPLOAD_DIR || path.join(DATA_DIR, 'learning-uploads'));
 const BACKUP_DIR = path.resolve(process.env.PERSONAL_MEMO_BACKUP_DIR || path.join(DATA_DIR, 'backups'));
 const DB_PATH = path.resolve(process.env.PERSONAL_MEMO_DB || path.join(DATA_DIR, 'memo.sqlite'));
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -127,7 +128,17 @@ db.exec(`
     markdown_image_paste_enabled INTEGER NOT NULL DEFAULT 1 CHECK (markdown_image_paste_enabled IN (0,1)),
     font_size_offset INTEGER NOT NULL DEFAULT 0 CHECK (font_size_offset IN (-1,0,1,2)),
     line_spacing TEXT NOT NULL DEFAULT 'comfortable' CHECK (line_spacing IN ('compact','comfortable','relaxed')),
-    font_family TEXT NOT NULL DEFAULT 'plex' CHECK (font_family IN ('plex','system','serif'))
+    font_family TEXT NOT NULL DEFAULT 'plex' CHECK (font_family IN ('plex','system','serif')),
+    language TEXT NOT NULL DEFAULT 'ar' CHECK (language IN ('ar','en')),
+    prayer_latitude REAL,
+    prayer_longitude REAL,
+    prayer_location TEXT NOT NULL DEFAULT '',
+    prayer_method INTEGER NOT NULL DEFAULT 5 CHECK (prayer_method IN (3,4,5,7,8,9,10,11,12,13,14,15,16,17)),
+    finance_currency TEXT NOT NULL DEFAULT 'EGP' CHECK (length(finance_currency)=3),
+    shortcut_todo TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyT',
+    shortcut_daily_note TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyD',
+    shortcut_read_later TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyR',
+    shortcut_quick_create TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyQ'
   );
   CREATE TABLE IF NOT EXISTS todos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,6 +154,50 @@ db.exec(`
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS finance_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+    currency TEXT NOT NULL DEFAULT 'EGP' CHECK (length(currency)=3),
+    billing_cycle TEXT NOT NULL CHECK (billing_cycle IN ('monthly','yearly')),
+    next_renewal_date TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'اشتراكات',
+    notes TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','cancelled')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_subscriptions_user_due ON finance_subscriptions(user_id,status,next_renewal_date,id);
+  CREATE TABLE IF NOT EXISTS finance_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN ('income','expense')),
+    description TEXT NOT NULL,
+    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+    currency TEXT NOT NULL DEFAULT 'EGP' CHECK (length(currency)=3),
+    category TEXT NOT NULL DEFAULT 'عام',
+    transaction_date TEXT NOT NULL,
+    notes TEXT NOT NULL DEFAULT '',
+    subscription_id INTEGER REFERENCES finance_subscriptions(id) ON DELETE SET NULL,
+    subscription_period TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(subscription_id,subscription_period)
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_transactions_user_date ON finance_transactions(user_id,transaction_date DESC,id DESC);
+  CREATE TABLE IF NOT EXISTS finance_budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    month TEXT NOT NULL,
+    category TEXT NOT NULL,
+    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+    currency TEXT NOT NULL DEFAULT 'EGP' CHECK (length(currency)=3),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id,month,category)
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_budgets_user_month ON finance_budgets(user_id,month,category);
   CREATE INDEX IF NOT EXISTS idx_todos_user_due ON todos(user_id,completed,due_date,id);
   CREATE TABLE IF NOT EXISTS saved_articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,11 +220,23 @@ db.exec(`
     url TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '',
     image_url TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'عام',
     deleted_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_bookmarks_user_updated ON bookmarks(user_id,deleted_at,updated_at DESC,id DESC);
+  CREATE TABLE IF NOT EXISTS code_snippets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    code TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_code_snippets_user_updated ON code_snippets(user_id,updated_at DESC,id DESC);
   CREATE TABLE IF NOT EXISTS daily_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -181,6 +248,37 @@ db.exec(`
     UNIQUE(user_id,note_date)
   );
   CREATE INDEX IF NOT EXISTS idx_daily_notes_user_date ON daily_notes(user_id,note_date DESC);
+  CREATE TABLE IF NOT EXISTS learning_topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'exploring' CHECK (status IN ('exploring','learning','reviewed')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_learning_topics_user_updated ON learning_topics(user_id,updated_at DESC,id DESC);
+  CREATE TABLE IF NOT EXISTS learning_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id INTEGER NOT NULL REFERENCES learning_topics(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_learning_notes_topic_updated ON learning_notes(topic_id,updated_at DESC,id DESC);
+  CREATE TABLE IF NOT EXISTS learning_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id INTEGER NOT NULL REFERENCES learning_notes(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_learning_files_note ON learning_files(note_id,created_at,id);
   CREATE TABLE IF NOT EXISTS pinned_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -307,21 +405,35 @@ for (const [table, column, definition] of [
   ['user_preferences', 'font_size_offset', 'INTEGER NOT NULL DEFAULT 0 CHECK (font_size_offset IN (-1,0,1,2))'],
   ['user_preferences', 'line_spacing', "TEXT NOT NULL DEFAULT 'comfortable' CHECK (line_spacing IN ('compact','comfortable','relaxed'))"],
   ['user_preferences', 'font_family', "TEXT NOT NULL DEFAULT 'plex' CHECK (font_family IN ('plex','system','serif'))"],
+  ['user_preferences', 'language', "TEXT NOT NULL DEFAULT 'ar' CHECK (language IN ('ar','en'))"],
+  ['user_preferences', 'prayer_latitude', 'REAL'],
+  ['user_preferences', 'prayer_longitude', 'REAL'],
+  ['user_preferences', 'prayer_location', "TEXT NOT NULL DEFAULT ''"],
+  ['user_preferences', 'prayer_method', 'INTEGER NOT NULL DEFAULT 5 CHECK (prayer_method IN (3,4,5,7,8,9,10,11,12,13,14,15,16,17))'],
+  ['user_preferences', 'finance_currency', "TEXT NOT NULL DEFAULT 'EGP' CHECK (length(finance_currency)=3)"],
+  ['user_preferences', 'shortcut_todo', "TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyT'"],
+  ['user_preferences', 'shortcut_daily_note', "TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyD'"],
+  ['user_preferences', 'shortcut_read_later', "TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyR'"],
+  ['user_preferences', 'shortcut_quick_create', "TEXT NOT NULL DEFAULT 'Ctrl+Alt+Shift+KeyQ'"],
   ['todos', 'due_time', 'TEXT'],
   ['todos', 'recurrence', "TEXT NOT NULL DEFAULT 'none' CHECK (recurrence IN ('none','daily','weekly','monthly'))"],
   ['todos', 'deleted_at', 'TEXT'],
   ['todos', 'source_todo_id', 'INTEGER REFERENCES todos(id)'],
   ['saved_articles', 'deleted_at', 'TEXT'],
   ['bookmarks', 'image_url', "TEXT NOT NULL DEFAULT ''"],
+  ['bookmarks', 'category', "TEXT NOT NULL DEFAULT 'عام'"],
   ['book_club_members', 'can_add_books', 'INTEGER NOT NULL DEFAULT 0 CHECK (can_add_books IN (0,1))'],
   ['book_club_books', 'total_pages', 'INTEGER NOT NULL DEFAULT 0 CHECK (total_pages >= 0)'],
   ['book_club_progress', 'pages_read', 'INTEGER NOT NULL DEFAULT 0 CHECK (pages_read >= 0)'],
 ]) {
-  if (!db.prepare(`PRAGMA table_info("${table}")`).all().some(existingColumn => existingColumn.name === column)) {
+  const tableColumns = db.prepare(`PRAGMA table_info("${table}")`).all();
+  if (!tableColumns.some(existingColumn => existingColumn.name === column)) {
     db.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`);
   }
 }
-db.prepare("UPDATE book_club_members SET can_add_books=1 WHERE role='owner'").run();
+if (db.prepare('PRAGMA table_info("book_club_members")').all().some(column => column.name === 'can_add_books')) {
+  db.prepare("UPDATE book_club_members SET can_add_books=1 WHERE role='owner'").run();
+}
 db.exec('CREATE TABLE IF NOT EXISTS undo_trash(token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, record_type TEXT NOT NULL, record_id INTEGER NOT NULL, record_json TEXT NOT NULL, expires_at TEXT NOT NULL)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_undo_trash_user_expiry ON undo_trash(user_id,expires_at)');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_todos_source_once ON todos(source_todo_id) WHERE source_todo_id IS NOT NULL');
@@ -733,6 +845,7 @@ async function createCompleteBackup() {
       appendMediaDirectory(archive, UPLOAD_DIR, 'uploads');
       appendMediaDirectory(archive, AUDIO_DIR, 'audio');
       appendMediaDirectory(archive, CLUB_UPLOAD_DIR, 'club-uploads');
+      appendMediaDirectory(archive, LEARNING_UPLOAD_DIR, 'learning-uploads');
       archive.finalize().catch(reject);
     });
   } catch (error) {
@@ -787,10 +900,12 @@ function extractCompleteBackup(filePath, destination) {
           const allowed = normalized === 'memo.sqlite' || normalized === 'manifest.json'
             || /^uploads\/[a-f0-9-]+\.(?:jpg|png|webp|gif)$/.test(normalized)
             || /^audio\/\d+\/[a-f0-9-]+\.(?:mp3|m4a|wav|ogg|webm|flac|aac|audio)$/.test(normalized)
-            || /^club-uploads\/\d+\/[a-f0-9-]+\.(?:jpg|png|webp|gif|pdf|txt|md|csv|json|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/.test(normalized);
+            || /^club-uploads\/\d+\/[a-f0-9-]+\.(?:jpg|png|webp|gif|pdf|txt|md|csv|json|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/.test(normalized)
+            || /^learning-uploads\/\d+\/[a-f0-9-]+\.(?:jpg|png|webp|gif|pdf|txt|md|csv|json|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/.test(normalized);
           if (isDirectory) {
-            if (!['uploads', 'audio', 'club-uploads'].includes(normalized)
-              && !/^audio\/\d+$/.test(normalized) && !/^club-uploads\/\d+$/.test(normalized)) {
+            if (!['uploads', 'audio', 'club-uploads', 'learning-uploads'].includes(normalized)
+              && !/^audio\/\d+$/.test(normalized) && !/^club-uploads\/\d+$/.test(normalized)
+              && !/^learning-uploads\/\d+$/.test(normalized)) {
               throw new BackupValidationError('يحتوي الأرشيف على مسارات غير مدعومة.');
             }
           } else {
@@ -803,7 +918,8 @@ function extractCompleteBackup(filePath, destination) {
                 || (normalized === 'manifest.json' && entry.uncompressedSize > 4096)
                 || (normalized.startsWith('uploads/') && entry.uncompressedSize > 5 * 1024 * 1024)
                 || (normalized.startsWith('audio/') && entry.uncompressedSize > 100 * 1024 * 1024)
-                || (normalized.startsWith('club-uploads/') && entry.uncompressedSize > 20 * 1024 * 1024)) {
+                || (normalized.startsWith('club-uploads/') && entry.uncompressedSize > 20 * 1024 * 1024)
+                || (normalized.startsWith('learning-uploads/') && entry.uncompressedSize > 20 * 1024 * 1024)) {
               throw new BackupValidationError('حجم أحد ملفات الأرشيف يتجاوز الحد المسموح.');
             }
             const targetPath = path.resolve(destination, ...normalized.split('/'));
@@ -859,6 +975,9 @@ function createBackupOnce() {
 const restoreTables = [
   'users',
   'application_settings',
+  'learning_topics',
+  'learning_notes',
+  'learning_files',
   'life_areas',
   'goals',
   'projects',
@@ -868,6 +987,9 @@ const restoreTables = [
   'image_attachments',
   'audio_attachments',
   'user_preferences',
+  'finance_subscriptions',
+  'finance_transactions',
+  'finance_budgets',
   'todos',
   'saved_articles',
   'calendar_events',
@@ -926,7 +1048,9 @@ function restoreDatabaseFrom(filePath, sourceTables) {
   try {
     const restore = db.transaction(() => {
       const currentTables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
-      const deleteOrder = ['sessions', 'progress_events', 'chapters', 'audio_attachments', 'image_attachments',
+      const deleteOrder = ['sessions', 'learning_files', 'learning_notes', 'learning_topics',
+        'finance_transactions', 'finance_budgets', 'finance_subscriptions',
+        'progress_events', 'chapters', 'audio_attachments', 'image_attachments',
         'habit_logs', 'routine_logs', 'todos', 'calendar_events', 'saved_articles', 'routines', 'habits',
         'book_club_message_attachments', 'book_club_message_links', 'book_club_notifications',
         'book_club_meetings', 'book_club_messages', 'book_club_progress', 'book_club_books',
@@ -1139,6 +1263,7 @@ function validateBookmark(body) {
     url: text(body?.url),
     note: text(body?.note),
     image_url: text(body?.image_url),
+    category: text(body?.category || 'عام'),
   };
   if (!bookmark.title || bookmark.title.length > 300) return { error: 'عنوان الرابط مطلوب ولا يتجاوز ٣٠٠ حرف.' };
   if (bookmark.url.length > 2048) return { error: 'الرابط أطول من المسموح.' };
@@ -1149,6 +1274,7 @@ function validateBookmark(body) {
     return { error: 'أدخل رابطاً صحيحاً يبدأ بـ http أو https.' };
   }
   if (bookmark.note.length > 2000) return { error: 'الملاحظة لا تتجاوز ٢٠٠٠ حرف.' };
+  if (bookmark.category.length > 40) return { error: 'اسم المجموعة لا يتجاوز ٤٠ حرفاً.' };
   if (bookmark.image_url && !/^\/uploads\/[a-f0-9-]+\.(?:jpg|png|webp|gif)$/.test(bookmark.image_url)) {
     return { error: 'اختر صورة معاينة صالحة.' };
   }
@@ -1263,19 +1389,28 @@ async function fetchPublicResource(input, maxBytes, redirects = 3) {
   const addresses = net.isIP(hostname)
     ? [{ address: hostname, family: net.isIP(hostname) }]
     : await dns.promises.lookup(hostname, { all: true, verbatim: true });
-  if (!addresses.length || addresses.some(entry => !isPublicAddress(entry.address))) {
+  if (!Array.isArray(addresses) || !addresses.length
+    || addresses.some(entry => !entry || typeof entry.address !== 'string'
+      || !net.isIP(entry.address) || !isPublicAddress(entry.address))) {
     throw new Error('عنوان الموقع يشير إلى شبكة خاصة ولا يمكن جلبه.');
   }
   const pinnedAddress = addresses[0];
+  const pinnedFamily = net.isIP(pinnedAddress.address);
+  if (!pinnedFamily) throw new Error('تعذّر تحديد عنوان آمن للموقع.');
   const transport = url.protocol === 'https:' ? https : http;
   const response = await new Promise((resolve, reject) => {
     const request = transport.get(url, {
       headers: { 'User-Agent': 'PersonalMemo/1.0 (+link preview)', Accept: 'text/html,image/*;q=0.9,*/*;q=0.5' },
       lookup(hostname, options, callback) {
-        if (hostname.replace(/^\[|\]$/g, '') !== url.hostname.replace(/^\[|\]$/g, '')) {
+        if (hostname.replace(/^\[|\]$/g, '') !== url.hostname.replace(/^\[|\]$/g, '')
+          || !pinnedAddress.address || !pinnedFamily) {
           return callback(new Error('Unexpected hostname during link preview.'));
         }
-        callback(null, pinnedAddress.address, pinnedAddress.family);
+        if (options && options.all) {
+          callback(null, [{ address: pinnedAddress.address, family: pinnedFamily }]);
+          return;
+        }
+        callback(null, pinnedAddress.address, pinnedFamily);
       },
     }, result => {
       const status = result.statusCode || 0;
@@ -1358,6 +1493,8 @@ registerApiRoutes(app, {
     S3StorageError,
     getS3Settings,
   },
+  learning: { db, text, now, fs, path, crypto, multer, learningUploadDir: LEARNING_UPLOAD_DIR },
+  finance: { db, text, now, localToday },
   bookClubs: {
     db,
     text,
@@ -1388,6 +1525,7 @@ registerApiRoutes(app, {
     uploadDir: UPLOAD_DIR,
     audioDir: AUDIO_DIR,
     clubUploadDir: CLUB_UPLOAD_DIR,
+    learningUploadDir: LEARNING_UPLOAD_DIR,
     isBackupInProgress: () => Boolean(backupInProgress),
     extractCompleteBackup,
     validateBackupDatabase,

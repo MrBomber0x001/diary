@@ -54,6 +54,38 @@
       </details>
       <button id="openLookupPanel" class="button button-quiet" type="button">⌕ بحث عن عنوان</button>
       <button id="focusModeToggle" class="button button-quiet focus-mode-toggle" type="button" aria-pressed="false" title="إخفاء عناصر الواجهة المشتتة">◉ وضع هادئ</button>
+      <div id="prayerTimesWidget" class="prayer-times-widget">
+        <button id="prayerTimesToggle" class="prayer-times-toggle" type="button" aria-expanded="false" aria-controls="prayerTimesPanel" aria-label="مواقيت الصلاة">
+          <span class="prayer-times-icon" aria-hidden="true">☾</span>
+          <span class="prayer-times-toggle-copy"><small>مواقيت الصلاة</small><strong id="prayerNextSummary">اضبط موقعك</strong></span>
+        </button>
+        <section id="prayerTimesPanel" class="prayer-times-panel hidden" aria-label="مواقيت الصلاة اليوم">
+          <header><div><strong id="prayerPanelLocation">مواقيت الصلاة</strong><time id="prayerPanelDate"></time></div><button id="prayerTimesRefresh" class="icon-button" type="button" aria-label="تحديث المواقيت" title="تحديث المواقيت">↻</button></header>
+          <p id="prayerTimesStatus" class="prayer-times-status" role="status"></p>
+          <div id="prayerTimesList" class="prayer-times-list"></div>
+          <button id="prayerTimesSettings" class="prayer-times-settings" type="button">إعدادات الموقع وطريقة الحساب</button>
+          <small class="prayer-times-attribution">المواقيت من AlAdhan API</small>
+        </section>
+      </div>
+      <div id="quranPlayerWidget" class="quran-player-widget">
+        <button id="quranPlayerToggle" class="quran-player-toggle" type="button" aria-expanded="false" aria-controls="quranPlayerPanel" aria-label="تشغيل القرآن الكريم أو الراديو">
+          <span aria-hidden="true">♫</span><span class="quran-player-toggle-label">استماع</span>
+        </button>
+        <section id="quranPlayerPanel" class="quran-player-panel hidden" aria-label="مشغل القرآن الكريم والراديو">
+          <header><div><strong>استمع للقرآن الكريم</strong><small>تلاوات وإذاعات قرآنية</small></div><button id="quranPlayerClose" class="icon-button" type="button" aria-label="إغلاق">×</button></header>
+          <label>المصدر<select id="quranPlayerMode"><option value="surah">سورة كاملة</option><option value="radio">إذاعة القرآن الكريم</option></select></label>
+          <div id="quranSurahControls">
+            <label>السورة<select id="quranSurahSelect"><option value="">جارٍ تحميل السور…</option></select></label>
+            <label>القارئ<select id="quranReciterSelect"><option value="ar.alafasy">مشاري العفاسي</option></select></label>
+          </div>
+          <div id="quranRadioControls" class="hidden">
+            <label>المحطة<select id="quranRadioSelect"><option value="">جارٍ تحميل الإذاعات…</option></select></label>
+          </div>
+          <p id="quranPlayerStatus" class="quran-player-status" role="status"></p>
+          <audio id="quranAudio" controls preload="none"></audio>
+          <small class="quran-player-attribution">البث من mp3quran.net · التلاوات من islamic.network</small>
+        </section>
+      </div>
       <div class="notification-center">
         <button id="notificationsButton" class="notifications-button" type="button" aria-expanded="false" aria-controls="notificationsPanel" aria-label="الإشعارات">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
@@ -85,6 +117,9 @@
         <a class="workspace-nav-link" href="#library" aria-label="مكتبتي"><span aria-hidden="true">▤</span><span class="workspace-nav-label">مكتبتي</span></a>
         <a class="workspace-nav-link" href="#articles" aria-label="للقراءة لاحقاً"><span aria-hidden="true">↗</span><span class="workspace-nav-label">للقراءة لاحقاً</span></a>
         <a class="workspace-nav-link" href="#bookmarks" aria-label="الروابط المهمة"><span aria-hidden="true">☆</span><span class="workspace-nav-label">الروابط المهمة</span></a>
+        <a class="workspace-nav-link" href="#snippets" aria-label="مقاطع برمجية"><span aria-hidden="true">&lt;/&gt;</span><span class="workspace-nav-label">مقاطع برمجية</span></a>
+        <a class="workspace-nav-link" href="#learning" aria-label="مركز التعلّم"><span aria-hidden="true">✧</span><span class="workspace-nav-label">مركز التعلّم</span></a>
+        <a class="workspace-nav-link" href="#finance" aria-label="الماليات والاشتراكات"><span aria-hidden="true">¤</span><span class="workspace-nav-label">الماليات</span></a>
         <a class="workspace-nav-link" href="#timeline" aria-label="الخط الزمني"><span aria-hidden="true">⌁</span><span class="workspace-nav-label">الخط الزمني</span></a>
         <a class="workspace-nav-link" href="#clubs" aria-label="نادي الكتاب"><span aria-hidden="true">♧</span><span class="workspace-nav-label">نادي الكتاب</span></a>
       </div>
@@ -211,9 +246,15 @@
 
     <section id="articles" class="workspace-section" aria-labelledby="articlesHeading">
       <div class="section-heading">
-        <div><p class="eyebrow">اقرأها وراجعها لاحقاً</p><h2 id="articlesHeading">المقالات والمواقع</h2></div>
+        <div><p class="eyebrow">اقرأها وراجعها لاحقاً</p><h2 id="articlesHeading">قائمة القراءة</h2><p id="articlesSummary" class="field-hint"></p></div>
         <button id="addArticleButton" class="button button-primary" type="button">＋ حفظ رابط</button>
       </div>
+      <nav id="articleStatusFilters" class="article-status-filters" aria-label="تصفية قائمة القراءة">
+        <button type="button" data-article-filter="all" aria-pressed="true">الكل <span id="articleCountAll">٠</span></button>
+        <button type="button" data-article-filter="unread" aria-pressed="false">لاحقاً <span id="articleCountUnread">٠</span></button>
+        <button type="button" data-article-filter="reading" aria-pressed="false">أقرأها <span id="articleCountReading">٠</span></button>
+        <button type="button" data-article-filter="read" aria-pressed="false">مكتملة <span id="articleCountRead">٠</span></button>
+      </nav>
       <div id="articlesList" class="article-list" aria-live="polite"></div>
     </section>
 
@@ -229,7 +270,62 @@
         <svg class="search-glyph" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
         <input id="bookmarkSearch" type="search" dir="auto" placeholder="ابحث في عناوين الروابط وملاحظاتها" aria-label="البحث في الروابط المهمة">
       </label>
+      <nav id="bookmarkCategories" class="bookmark-categories" aria-label="مجموعات الروابط"></nav>
+      <p id="bookmarkResultsSummary" class="bookmark-results-summary" aria-live="polite"></p>
       <div id="bookmarksList" class="bookmark-list" aria-live="polite"></div>
+    </section>
+
+    <section id="snippets" class="workspace-section" aria-labelledby="snippetsHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">مكتبة أدواتك اليومية</p><h2 id="snippetsHeading">مقاطع برمجية</h2><p id="snippetsSummary" class="field-hint"></p></div>
+        <button id="addSnippetButton" class="button button-primary" type="button"><span aria-hidden="true">＋</span> مقطع جديد</button>
+      </div>
+      <div class="snippet-library-toolbar">
+        <label class="snippet-search"><svg class="search-glyph" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><input id="snippetSearch" type="search" dir="auto" placeholder="ابحث بالعنوان أو اللغة أو محتوى المقطع" aria-label="ابحث في المقاطع البرمجية"></label>
+        <span class="snippet-library-hint"><span aria-hidden="true">&lt;/&gt;</span> احفظ ما تستخدمه كثيراً، وانسخه وقت الحاجة</span>
+      </div>
+      <nav id="snippetLanguageFilters" class="snippet-language-filters" aria-label="تصفية حسب لغة البرمجة"></nav>
+      <div id="snippetsList" class="snippet-list" aria-live="polite"></div>
+    </section>
+
+    <section id="learning" class="workspace-section learning-workspace" aria-labelledby="learningHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">تعلّمك، مرتب بطريقتك</p><h2 id="learningHeading">مركز التعلّم</h2><p id="learningSummary" class="field-hint"></p></div>
+        <button id="addLearningTopic" class="button button-primary" type="button">＋ موضوع جديد</button>
+      </div>
+      <label class="learning-search"><svg class="search-glyph" aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><input id="learningSearch" type="search" dir="auto" placeholder="ابحث في الموضوعات والملاحظات" aria-label="ابحث في مركز التعلّم"></label>
+      <div class="learning-layout">
+        <aside id="learningTopicList" class="learning-topic-list" aria-label="موضوعات التعلّم"></aside>
+        <section id="learningTopicContent" class="learning-topic-content" aria-live="polite"></section>
+      </div>
+    </section>
+
+    <section id="finance" class="workspace-section finance-workspace" aria-labelledby="financeHeading">
+      <div class="section-heading">
+        <div><p class="eyebrow">صورة أوضح لدخلك ومصروفاتك</p><h2 id="financeHeading">الماليات والاشتراكات</h2><p id="financeMonthLabel" class="field-hint"></p></div>
+        <div class="finance-heading-actions">
+          <label class="finance-month-picker">الشهر<input id="financeMonth" type="month"></label>
+          <button id="addFinanceTransaction" class="button button-primary" type="button">＋ عملية</button>
+          <button id="addFinanceSubscription" class="button button-quiet" type="button">＋ اشتراك</button>
+        </div>
+      </div>
+      <div id="financeSummary" class="finance-summary" aria-live="polite"></div>
+      <div class="finance-layout">
+        <section class="finance-panel" aria-labelledby="financeTransactionsHeading">
+          <div class="finance-panel-heading"><div><h3 id="financeTransactionsHeading">الدخل والمصروفات</h3><p>سجّل العمليات يدوياً، من غير ربط حساب بنكي.</p></div></div>
+          <div id="financeTransactionList" class="finance-transaction-list" aria-live="polite"></div>
+        </section>
+        <div class="finance-side-column">
+          <section class="finance-panel" aria-labelledby="financeBudgetHeading">
+            <div class="finance-panel-heading"><div><h3 id="financeBudgetHeading">الميزانيات الشهرية</h3><p>قارن إنفاق كل تصنيف بالحد الذي حددته.</p></div><button id="addFinanceBudget" class="small-button" type="button">＋ ميزانية</button></div>
+            <div id="financeBudgetList" class="finance-budget-list"></div>
+          </section>
+          <section class="finance-panel" aria-labelledby="financeSubscriptionHeading">
+            <div class="finance-panel-heading"><div><h3 id="financeSubscriptionHeading">الاشتراكات</h3><p>التجديدات القادمة والتكلفة الشهرية التقديرية.</p></div></div>
+            <div id="financeSubscriptionList" class="finance-subscription-list"></div>
+          </section>
+        </div>
+      </div>
     </section>
 
     <section id="timeline" class="workspace-section" aria-labelledby="timelineHeading">
@@ -240,6 +336,11 @@
         <label>من<input name="start" type="date"></label>
         <label>إلى<input name="end" type="date"></label>
         <button class="button button-primary" type="submit">عرض الفترة</button>
+        <div class="timeline-presets" role="group" aria-label="فترة سريعة">
+          <button type="button" data-timeline-range="7">أسبوع</button>
+          <button type="button" data-timeline-range="30">شهر</button>
+          <button type="button" data-timeline-range="365">سنة</button>
+        </div>
       </form>
       <div id="timelineList" class="timeline-list" aria-live="polite"></div>
     </section>
@@ -351,6 +452,79 @@
       <button class="quick-create-option" type="button" data-create-action="article"><span aria-hidden="true">↗</span><span><strong>رابط للقراءة لاحقاً</strong><small>احفظ مقالاً أو صفحة ويب</small></span></button>
       <button class="quick-create-option" type="button" data-create-action="event"><span aria-hidden="true">▦</span><span><strong>موعد</strong><small>خطط لوقت محدد</small></span></button>
     </div>
+  </dialog>
+
+  <dialog id="snippetDialog" class="dialog">
+    <form id="snippetForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">مكتبتك الخاصة</p><h2 id="snippetDialogTitle">حفظ مقطع برمجي</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <input name="id" type="hidden">
+      <label>اسم المقطع<input name="title" required maxlength="160" dir="auto" placeholder="مثال: طلب API مع إعادة المحاولة"></label>
+      <div class="snippet-form-grid">
+        <label>لغة البرمجة<input name="language" maxlength="40" dir="auto" placeholder="JavaScript، SQL..."></label>
+        <label>وصف مختصر<input name="description" maxlength="1000" dir="auto" placeholder="متى تستخدم هذا المقطع؟"></label>
+      </div>
+      <label class="spaced">الكود<textarea name="code" required maxlength="30000" rows="14" dir="ltr" spellcheck="false" class="snippet-code-input" placeholder="الصق المقطع البرمجي هنا"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ المقطع</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="financeDialog" class="dialog">
+    <form id="financeForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">إدارة مالية شخصية</p><h2 id="financeDialogTitle"></h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <input name="id" type="hidden">
+      <input name="mode" type="hidden">
+      <label id="financeTypeField">نوع العملية<select name="type"><option value="expense">مصروف</option><option value="income">دخل</option></select></label>
+      <label id="financeDescriptionField">الوصف<input name="description" maxlength="160" dir="auto"></label>
+      <label id="financeNameField" class="hidden">اسم الاشتراك<input name="name" maxlength="160" dir="auto"></label>
+      <label class="spaced">المبلغ<input name="amount" type="number" min="0.01" max="999999999.99" step="0.01" required inputmode="decimal"></label>
+      <label id="financeCategoryField" class="spaced">التصنيف<input name="category" maxlength="80" dir="auto" value="عام"></label>
+      <label id="financeDateField" class="spaced">تاريخ العملية<input name="transaction_date" type="date"></label>
+      <label id="financeRenewalField" class="spaced hidden">تاريخ التجديد القادم<input name="next_renewal_date" type="date"></label>
+      <label id="financeCycleField" class="spaced hidden">دورة الدفع<select name="billing_cycle"><option value="monthly">شهري</option><option value="yearly">سنوي</option></select></label>
+      <label id="financeStatusField" class="spaced hidden">الحالة<select name="status"><option value="active">نشط</option><option value="paused">متوقف مؤقتاً</option><option value="cancelled">ملغى</option></select></label>
+      <label id="financeMonthField" class="spaced hidden">الشهر<input name="month" type="month"></label>
+      <label id="financeNotesField" class="spaced">ملاحظات<textarea name="notes" rows="2" maxlength="1000" dir="auto"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button id="financeSubmitButton" class="button button-primary" type="submit">حفظ</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="learningTopicDialog" class="dialog">
+    <form id="learningTopicForm" class="dialog-card">
+      <div class="dialog-heading"><div><p class="eyebrow">مساحة معرفة خاصة</p><h2 id="learningTopicDialogTitle">موضوع تعلّم جديد</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <input name="id" type="hidden">
+      <label>اسم الموضوع<input name="title" required maxlength="160" dir="auto" placeholder="مثال: أساسيات TypeScript"></label>
+      <label class="spaced">وصف مختصر<textarea name="description" rows="3" maxlength="2000" dir="auto" placeholder="ما الذي تريد فهمه في هذا الموضوع؟"></textarea></label>
+      <label class="spaced">حالتي<select name="status"><option value="exploring">استكشاف</option><option value="learning">أتعلم الآن</option><option value="reviewed">تمت المراجعة</option></select></label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ الموضوع</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="learningNoteDialog" class="dialog">
+    <form id="learningNoteForm" class="dialog-card learning-note-form">
+      <div class="dialog-heading"><div><p id="learningNoteTopicName" class="eyebrow">ملاحظة موضوع</p><h2 id="learningNoteDialogTitle">ملاحظة جديدة</h2></div><button type="button" class="icon-button" data-close aria-label="إغلاق">×</button></div>
+      <div class="learning-editor-actions">
+        <button id="learningNoteFocusToggle" class="button button-quiet" type="button" aria-pressed="false">وضع التركيز</button>
+        <a id="learningNoteOpenTab" class="button button-quiet" href="#" target="_blank" rel="noopener">افتح المحرر في تبويب جديد</a>
+      </div>
+      <input name="id" type="hidden"><input name="topic_id" type="hidden">
+      <label>عنوان الملاحظة<input name="title" required maxlength="200" dir="auto" placeholder="الفكرة أو الدرس الذي تريد حفظه"></label>
+      <label class="spaced">محتوى Markdown
+        <div class="markdown-toolbar">
+          <button type="button" data-learning-format="## عنوان">عنوان</button>
+          <button type="button" data-learning-format="- نقطة">قائمة</button>
+          <button type="button" data-learning-format="> اقتباس">اقتباس</button>
+          <button type="button" data-learning-format="`كود`">كود</button>
+          <button id="learningNotePreviewToggle" type="button" aria-pressed="false">معاينة</button>
+        </div>
+        <textarea name="body" id="learningNoteBody" class="markdown-input" rows="12" maxlength="50000" dir="auto" placeholder="دوّن ما فهمته، أضف أمثلة وروابط، وارجع إليه لاحقاً."></textarea>
+        <div id="learningNotePreview" class="markdown-preview hidden"></div>
+      </label>
+      <label class="learning-file-picker">ملفات مساندة (اختياري)
+        <input name="files" type="file" multiple accept=".pdf,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp">
+        <small>PDF، مستندات، صور وملفات نصية · حتى ٢٠ ميغابايت لكل ملف</small>
+      </label>
+      <div class="dialog-actions"><button type="button" class="button button-quiet" data-close>إلغاء</button><button class="button button-primary" type="submit">حفظ الملاحظة</button></div>
+    </form>
   </dialog>
 
   <div id="lookupBackdrop" class="panel-backdrop hidden"></div>
@@ -605,6 +779,10 @@
       </div>
       <input name="image_url" type="hidden">
       <img id="bookmarkImagePreview" class="bookmark-image-preview hidden" alt="معاينة صورة الرابط">
+      <label class="spaced">المجموعة
+        <input name="category" list="bookmarkCategoryOptions" maxlength="40" dir="auto" placeholder="مثال: عمل، تعلّم، أدوات">
+        <datalist id="bookmarkCategoryOptions"></datalist>
+      </label>
       <label class="spaced">ملاحظة<textarea name="note" rows="3" maxlength="2000" dir="auto" placeholder="لماذا تريد الاحتفاظ بهذا الرابط؟"></textarea></label>
       <div class="dialog-actions">
         <button type="button" class="button button-quiet" data-close>إلغاء</button>
@@ -679,6 +857,33 @@
       <label class="spaced">المظهر
         <select name="themeMode"><option value="system">حسب إعداد الجهاز</option><option value="light">فاتح</option><option value="dark">داكن</option></select>
       </label>
+      <label class="spaced">اللغة
+        <select name="language"><option value="ar">العربية</option><option value="en">الإنجليزية</option></select>
+      </label>
+      <label class="spaced">العملة الافتراضية
+        <select name="financeCurrency"><option value="EGP">EGP - الجنيه المصري</option><option value="SAR">SAR - الريال السعودي</option><option value="AED">AED - الدرهم الإماراتي</option><option value="QAR">QAR - الريال القطري</option><option value="KWD">KWD - الدينار الكويتي</option><option value="USD">USD - الدولار الأمريكي</option><option value="EUR">EUR - اليورو</option><option value="GBP">GBP - الجنيه الإسترليني</option></select>
+      </label>
+      <section class="typography-settings prayer-settings" aria-labelledby="prayerSettingsHeading">
+        <div class="settings-section-heading"><h3 id="prayerSettingsHeading">مواقيت الصلاة</h3><p>أدخل إحداثيات موقعك أو استخدم موقع الجهاز. تُرسل الإحداثيات إلى AlAdhan لحساب المواقيت.</p></div>
+        <label>اسم الموقع<input name="prayerLocation" maxlength="120" dir="auto" placeholder="مثال: القاهرة"></label>
+        <div class="typography-settings-grid">
+          <label>خط العرض<input name="prayerLatitude" type="number" min="-90" max="90" step="any" dir="ltr" placeholder="30.0444"></label>
+          <label>خط الطول<input name="prayerLongitude" type="number" min="-180" max="180" step="any" dir="ltr" placeholder="31.2357"></label>
+        </div>
+        <button id="useCurrentPrayerLocation" class="button button-quiet" type="button">استخدم موقعي الحالي</button>
+        <p id="prayerLocationStatus" class="field-hint" role="status"></p>
+        <label class="spaced">طريقة الحساب
+          <select name="prayerMethod">
+            <option value="5">الهيئة المصرية العامة للمساحة</option>
+            <option value="3">رابطة العالم الإسلامي</option>
+            <option value="4">أم القرى - مكة</option>
+            <option value="2">الجمعية الإسلامية لأمريكا الشمالية</option>
+            <option value="1">جامعة العلوم الإسلامية - كراتشي</option>
+            <option value="12">اتحاد المنظمات الإسلامية في فرنسا</option>
+            <option value="13">تركيا - رئاسة الشؤون الدينية</option>
+          </select>
+        </label>
+      </section>
       <section class="typography-settings" aria-labelledby="typographySettingsHeading">
         <div class="settings-section-heading"><h3 id="typographySettingsHeading">الخط والقراءة</h3><p>خصص وضوح النص وتباعده بما يناسبك.</p></div>
         <div class="typography-settings-grid">
@@ -698,6 +903,16 @@
             </select>
           </label>
         </div>
+      </section>
+      <section class="typography-settings" aria-labelledby="shortcutsSettingsHeading">
+        <div class="settings-section-heading"><h3 id="shortcutsSettingsHeading">اختصارات لوحة المفاتيح</h3><p>اختصارات تعمل عند عدم الكتابة داخل حقل أو فتح نافذة.</p></div>
+        <div class="shortcut-settings-grid">
+          <label>مهمة سريعة<select name="shortcutTodo"></select></label>
+          <label>مذكرة اليوم<select name="shortcutDailyNote"></select></label>
+          <label>قائمة القراءة<select name="shortcutReadLater"></select></label>
+          <label>قائمة الإنشاء<select name="shortcutQuickCreate"></select></label>
+        </div>
+        <p class="field-hint">اضغط Ctrl + Alt + Shift مع الحرف المحدد. Ctrl + K للبحث و Ctrl + N لقائمة الإنشاء متاحان دائماً.</p>
       </section>
       <label class="spaced checkbox-field"><input name="notificationSoundEnabled" type="checkbox"> تشغيل صوت عند ظهور إشعار جديد</label>
       <p class="field-hint">يصدر التطبيق نغمة قصيرة عند ظهور تنبيه جديد داخل التطبيق، ويمكنك إيقافها هنا.</p>
@@ -766,6 +981,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"><span id="toastMessage"></span><button id="toastUndo" class="toast-undo hidden" type="button">تراجع</button></div>
   <footer>مكتبة كل حساب وصوره وملفاته الصوتية محفوظة محلياً على هذا الجهاز. البحث عن البيانات يستخدم الإنترنت فقط (Open Library أو IMDb أو Wikipedia).</footer>
   </div>
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

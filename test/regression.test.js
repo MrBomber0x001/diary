@@ -11,6 +11,7 @@ process.env.PERSONAL_MEMO_DB = path.join(testDirectory, 'memo.sqlite');
 process.env.PERSONAL_MEMO_UPLOAD_DIR = path.join(testDirectory, 'uploads');
 process.env.PERSONAL_MEMO_AUDIO_DIR = path.join(testDirectory, 'audio');
 process.env.PERSONAL_MEMO_CLUB_UPLOAD_DIR = path.join(testDirectory, 'club-uploads');
+process.env.PERSONAL_MEMO_LEARNING_UPLOAD_DIR = path.join(testDirectory, 'learning-uploads');
 process.env.PERSONAL_MEMO_BACKUP_DIR = path.join(testDirectory, 'backups');
 
 const legacyDatabase = new Database(process.env.PERSONAL_MEMO_DB);
@@ -21,7 +22,17 @@ legacyDatabase.exec(`CREATE TABLE book_club_members (
   joined_at TEXT NOT NULL,
   PRIMARY KEY (club_id,user_id)
 );
-CREATE TABLE user_preferences (user_id INTEGER PRIMARY KEY);`);
+CREATE TABLE user_preferences (
+  user_id INTEGER PRIMARY KEY,
+  edit_mode TEXT NOT NULL DEFAULT 'inline',
+  notification_enabled INTEGER NOT NULL DEFAULT 0,
+  theme_mode TEXT NOT NULL DEFAULT 'system',
+  reminder_minutes INTEGER NOT NULL DEFAULT 15,
+  notification_sound_enabled INTEGER NOT NULL DEFAULT 1,
+  markdown_rendering_enabled INTEGER NOT NULL DEFAULT 1,
+  markdown_toolbar_enabled INTEGER NOT NULL DEFAULT 1,
+  markdown_image_paste_enabled INTEGER NOT NULL DEFAULT 1
+);`);
 legacyDatabase.close();
 
 const { app, db } = require('../server');
@@ -30,6 +41,14 @@ const migratedPreferenceColumns = db.prepare('PRAGMA table_info(user_preferences
 assert.ok(migratedPreferenceColumns.includes('font_size_offset'));
 assert.ok(migratedPreferenceColumns.includes('line_spacing'));
 assert.ok(migratedPreferenceColumns.includes('font_family'));
+assert.ok(migratedPreferenceColumns.includes('language'));
+assert.ok(migratedPreferenceColumns.includes('prayer_latitude'));
+assert.ok(migratedPreferenceColumns.includes('prayer_longitude'));
+assert.ok(migratedPreferenceColumns.includes('prayer_location'));
+assert.ok(migratedPreferenceColumns.includes('prayer_method'));
+assert.ok(migratedPreferenceColumns.includes('finance_currency'));
+assert.ok(migratedPreferenceColumns.includes('shortcut_todo'));
+assert.ok(db.prepare('PRAGMA table_info(bookmarks)').all().some(column => column.name === 'category'));
 let server;
 let baseUrl;
 let ownerCookie;
@@ -178,15 +197,82 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     title: 'Regression guide',
     url: 'https://example.com/guide',
     note: 'Keep this useful reference nearby',
+    category: 'تعلم',
   }, ownerCookie);
   assert.equal(bookmark.response.status, 201);
   assert.equal(bookmark.result.note, 'Keep this useful reference nearby');
+  assert.equal(bookmark.result.category, 'تعلم');
+  const categorizedBookmarkUpdate = await jsonRequest(`/api/bookmarks/${bookmark.result.id}`, 'PUT', {
+    title: 'Regression guide',
+    url: 'https://example.com/guide',
+    note: 'Keep this useful reference nearby',
+    category: 'عمل',
+  }, ownerCookie);
+  assert.equal(categorizedBookmarkUpdate.response.status, 200);
+  assert.equal(categorizedBookmarkUpdate.result.category, 'عمل');
+  const invalidBookmarkCategory = await jsonRequest('/api/bookmarks', 'POST', {
+    title: 'Too long group',
+    url: 'https://example.com/category',
+    category: 'a'.repeat(41),
+  }, ownerCookie);
+  assert.equal(invalidBookmarkCategory.response.status, 400);
   const invalidBookmark = await jsonRequest('/api/bookmarks', 'POST', {
     title: 'Unsafe link',
     url: 'javascript:alert(1)',
     note: '',
   }, ownerCookie);
   assert.equal(invalidBookmark.response.status, 400);
+  const snippet = await jsonRequest('/api/snippets', 'POST', {
+    title: 'Fetch with timeout',
+    language: 'JavaScript',
+    description: 'A reusable fetch example',
+    code: 'const response = await fetch(url);',
+  }, ownerCookie);
+  assert.equal(snippet.response.status, 201);
+  assert.equal(snippet.result.code, 'const response = await fetch(url);');
+  const invalidSnippet = await jsonRequest('/api/snippets', 'POST', {
+    title: '',
+    code: '',
+  }, ownerCookie);
+  assert.equal(invalidSnippet.response.status, 400);
+  const updatedSnippet = await jsonRequest(`/api/snippets/${snippet.result.id}`, 'PUT', {
+    title: 'Fetch with timeout',
+    language: 'JavaScript',
+    description: 'Updated description',
+    code: 'const response = await fetch(url, { signal });',
+  }, ownerCookie);
+  assert.equal(updatedSnippet.response.status, 200);
+  assert.equal(updatedSnippet.result.description, 'Updated description');
+
+  const learningTopic = await jsonRequest('/api/learning/topics', 'POST', {
+    title: 'TypeScript foundations',
+    description: 'Types and practical patterns',
+    status: 'learning',
+  }, ownerCookie);
+  assert.equal(learningTopic.response.status, 201);
+  const learningNote = await jsonRequest(`/api/learning/topics/${learningTopic.result.id}/notes`, 'POST', {
+    title: 'Narrowing union types',
+    body: '## Discriminated unions\nUse a shared property to narrow safely.',
+  }, ownerCookie);
+  assert.equal(learningNote.response.status, 201);
+  const learningFiles = new FormData();
+  learningFiles.append('files', new Blob(['Useful reference material'], { type: 'text/plain' }), 'reference.txt');
+  const uploadedLearningFiles = await request(`/api/learning/notes/${learningNote.result.id}/files`, {
+    method: 'POST',
+    body: learningFiles,
+    cookie: ownerCookie,
+  });
+  assert.equal(uploadedLearningFiles.response.status, 201);
+  const learningDetail = await request(`/api/learning/topics/${learningTopic.result.id}`, { cookie: ownerCookie });
+  assert.equal(learningDetail.result.notes[0].title, 'Narrowing union types');
+  assert.equal(learningDetail.result.notes[0].files.length, 1);
+  const downloadedLearningFile = await request(learningDetail.result.notes[0].files[0].url, { cookie: ownerCookie });
+  assert.equal(downloadedLearningFile.response.status, 200);
+  assert.equal(Buffer.from(downloadedLearningFile.result).toString('utf8'), 'Useful reference material');
+  const privateLearningTopic = await request(`/api/learning/topics/${learningTopic.result.id}`, {
+    cookie: await createAccount('learning_guest', 'guest-password-1234'),
+  });
+  assert.equal(privateLearningTopic.response.status, 404);
 
   const recurring = await jsonRequest('/api/todos', 'POST', {
     title: 'Regression monthly task',
@@ -225,6 +311,18 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     fontSizeOffset: 2,
     lineSpacing: 'relaxed',
     fontFamily: 'serif',
+    language: 'en',
+    prayerLatitude: 30.0444,
+    prayerLongitude: 31.2357,
+    prayerLocation: 'Cairo',
+    prayerMethod: 5,
+    financeCurrency: 'EGP',
+    shortcuts: {
+      todo: 'Ctrl+Alt+Shift+KeyA',
+      dailyNote: 'Ctrl+Alt+Shift+KeyD',
+      readLater: 'Ctrl+Alt+Shift+KeyR',
+      quickCreate: 'Ctrl+Alt+Shift+KeyQ',
+    },
   }, ownerCookie);
   assert.equal(preferences.response.status, 200);
   const savedPreferences = await request('/api/settings', { cookie: ownerCookie });
@@ -237,8 +335,115 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(savedPreferences.result.fontSizeOffset, 2);
   assert.equal(savedPreferences.result.lineSpacing, 'relaxed');
   assert.equal(savedPreferences.result.fontFamily, 'serif');
+  assert.equal(savedPreferences.result.language, 'en');
+  assert.equal(savedPreferences.result.prayerLatitude, 30.0444);
+  assert.equal(savedPreferences.result.prayerLongitude, 31.2357);
+  assert.equal(savedPreferences.result.prayerLocation, 'Cairo');
+  assert.equal(savedPreferences.result.prayerMethod, 5);
+  assert.equal(savedPreferences.result.financeCurrency, 'EGP');
+  assert.deepEqual(savedPreferences.result.shortcuts, {
+    todo: 'Ctrl+Alt+Shift+KeyA',
+    dailyNote: 'Ctrl+Alt+Shift+KeyD',
+    readLater: 'Ctrl+Alt+Shift+KeyR',
+    quickCreate: 'Ctrl+Alt+Shift+KeyQ',
+  });
   const invalidReminder = await jsonRequest('/api/settings', 'PUT', { reminderMinutes: 17 }, ownerCookie);
   assert.equal(invalidReminder.response.status, 400);
+  const invalidLanguage = await jsonRequest('/api/settings', 'PUT', { language: 'fr' }, ownerCookie);
+  assert.equal(invalidLanguage.response.status, 400);
+  const invalidFinanceCurrency = await jsonRequest('/api/settings', 'PUT', { financeCurrency: 'XXX' }, ownerCookie);
+  assert.equal(invalidFinanceCurrency.response.status, 400);
+  const changedFinanceCurrency = await jsonRequest('/api/settings', 'PUT', { financeCurrency: 'USD' }, ownerCookie);
+  assert.equal(changedFinanceCurrency.response.status, 200);
+  assert.equal((await request('/api/settings', { cookie: ownerCookie })).result.financeCurrency, 'USD');
+  assert.equal((await jsonRequest('/api/settings', 'PUT', { financeCurrency: 'EGP' }, ownerCookie)).response.status, 200);
+  const invalidFinanceMonth = await request('/api/finance?month=2024-13', { cookie: ownerCookie });
+  assert.equal(invalidFinanceMonth.response.status, 400);
+  const emptyFinance = await request('/api/finance?month=2024-01', { cookie: ownerCookie });
+  assert.equal(emptyFinance.result.currency, 'EGP');
+  assert.equal(emptyFinance.result.summary.income, 0);
+  const financeIncome = await jsonRequest('/api/finance/transactions', 'POST', {
+    type: 'income', description: 'Salary', amount: '4500', category: 'Work', transaction_date: '2024-01-05',
+  }, ownerCookie);
+  assert.equal(financeIncome.response.status, 201);
+  const financeExpense = await jsonRequest('/api/finance/transactions', 'POST', {
+    type: 'expense', description: 'Groceries', amount: '100', category: 'Food', transaction_date: '2024-01-10',
+  }, ownerCookie);
+  assert.equal(financeExpense.response.status, 201);
+  const updatedFinanceExpense = await jsonRequest(`/api/finance/transactions/${financeExpense.result.id}`, 'PUT', {
+    type: 'expense', description: 'Groceries', amount: '120', category: 'Food', transaction_date: '2024-01-10',
+  }, ownerCookie);
+  assert.equal(updatedFinanceExpense.response.status, 200);
+  const invalidFinanceAmount = await jsonRequest('/api/finance/transactions', 'POST', {
+    type: 'expense', description: 'Invalid', amount: 0, transaction_date: '2024-01-10',
+  }, ownerCookie);
+  assert.equal(invalidFinanceAmount.response.status, 400);
+  const invalidFinanceDate = await jsonRequest('/api/finance/transactions', 'POST', {
+    type: 'expense', description: 'Invalid date', amount: 1, transaction_date: '2024-02-30',
+  }, ownerCookie);
+  assert.equal(invalidFinanceDate.response.status, 400);
+  const financeBudget = await jsonRequest('/api/finance/budgets', 'PUT', {
+    month: '2024-01', category: 'Food', amount: 500,
+  }, ownerCookie);
+  assert.equal(financeBudget.response.status, 200);
+  const monthlySubscription = await jsonRequest('/api/finance/subscriptions', 'POST', {
+    name: 'Music', amount: '39.99', billing_cycle: 'monthly', next_renewal_date: '2024-01-31', category: 'Entertainment',
+  }, ownerCookie);
+  assert.equal(monthlySubscription.response.status, 201);
+  const monthlyPayment = await jsonRequest(`/api/finance/subscriptions/${monthlySubscription.result.id}/pay`, 'POST', {
+    period: '2024-01-31', paid_date: '2024-01-31',
+  }, ownerCookie);
+  assert.equal(monthlyPayment.response.status, 201);
+  assert.equal(monthlyPayment.result.subscription.next_renewal_date, '2024-02-29');
+  const duplicateMonthlyPayment = await jsonRequest(`/api/finance/subscriptions/${monthlySubscription.result.id}/pay`, 'POST', {
+    period: '2024-01-31', paid_date: '2024-01-31',
+  }, ownerCookie);
+  assert.equal(duplicateMonthlyPayment.response.status, 409);
+  const yearlySubscription = await jsonRequest('/api/finance/subscriptions', 'POST', {
+    name: 'Annual service', amount: 1200, billing_cycle: 'yearly', next_renewal_date: '2024-02-29',
+  }, ownerCookie);
+  assert.equal(yearlySubscription.response.status, 201);
+  const yearlyPayment = await jsonRequest(`/api/finance/subscriptions/${yearlySubscription.result.id}/pay`, 'POST', {
+    period: '2024-02-29', paid_date: '2024-02-29',
+  }, ownerCookie);
+  assert.equal(yearlyPayment.result.subscription.next_renewal_date, '2025-02-28');
+  const financeMonth = await request('/api/finance?month=2024-01', { cookie: ownerCookie });
+  assert.equal(financeMonth.result.summary.income, 4500);
+  assert.equal(financeMonth.result.summary.expenses, 159.99);
+  assert.equal(financeMonth.result.budgets[0].spent, 120);
+  const temporaryTransaction = await jsonRequest('/api/finance/transactions', 'POST', {
+    type: 'expense', description: 'Delete test', amount: 1, transaction_date: '2024-01-11',
+  }, ownerCookie);
+  assert.equal((await request(`/api/finance/transactions/${temporaryTransaction.result.id}`, {
+    method: 'DELETE', cookie: ownerCookie,
+  })).response.status, 200);
+  const temporarySubscription = await jsonRequest('/api/finance/subscriptions', 'POST', {
+    name: 'Delete test', amount: 1, billing_cycle: 'monthly', next_renewal_date: '2024-01-11',
+  }, ownerCookie);
+  assert.equal((await request(`/api/finance/subscriptions/${temporarySubscription.result.id}`, {
+    method: 'DELETE', cookie: ownerCookie,
+  })).response.status, 200);
+  const temporaryBudget = await jsonRequest('/api/finance/budgets', 'PUT', {
+    month: '2024-01', category: 'Temporary', amount: 1,
+  }, ownerCookie);
+  assert.equal(temporaryBudget.response.status, 200);
+  const temporaryBudgetId = db.prepare(`SELECT id FROM finance_budgets WHERE user_id=?
+    AND month='2024-01' AND category='Temporary'`).get(db.prepare('SELECT id FROM users WHERE username=?').get('owner_test').id).id;
+  assert.equal((await request(`/api/finance/budgets/${temporaryBudgetId}`, {
+    method: 'DELETE', cookie: ownerCookie,
+  })).response.status, 200);
+  const invalidPrayerLocation = await jsonRequest('/api/settings', 'PUT', {
+    prayerLatitude: 91,
+    prayerLongitude: 31,
+  }, ownerCookie);
+  assert.equal(invalidPrayerLocation.response.status, 400);
+  const partialPrayerLocation = await jsonRequest('/api/settings', 'PUT', {
+    prayerLatitude: 30,
+    prayerLongitude: null,
+  }, ownerCookie);
+  assert.equal(partialPrayerLocation.response.status, 400);
+  const invalidPrayerMethod = await jsonRequest('/api/settings', 'PUT', { prayerMethod: 99 }, ownerCookie);
+  assert.equal(invalidPrayerMethod.response.status, 400);
   const invalidMarkdownPreference = await jsonRequest('/api/settings', 'PUT', {
     markdownImagePasteEnabled: 'false',
   }, ownerCookie);
@@ -249,6 +454,15 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
     fontFamily: 'comic-sans',
   }, ownerCookie);
   assert.equal(invalidTypographyPreference.response.status, 400);
+  const duplicateShortcuts = await jsonRequest('/api/settings', 'PUT', {
+    shortcuts: {
+      todo: 'Ctrl+Alt+Shift+KeyT',
+      dailyNote: 'Ctrl+Alt+Shift+KeyT',
+      readLater: 'Ctrl+Alt+Shift+KeyR',
+      quickCreate: 'Ctrl+Alt+Shift+KeyQ',
+    },
+  }, ownerCookie);
+  assert.equal(duplicateShortcuts.response.status, 400);
   const cloudSettings = await jsonRequest('/api/settings', 'PUT', {
     s3Enabled: false,
     s3Bucket: '',
@@ -457,6 +671,9 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.ok(entries.includes(`uploads/${coverFilename}`));
   assert.ok(entries.includes(`audio/1/${audioFilename}`));
   assert.ok(entries.includes(`club-uploads/${backupClub.result.id}/${clubAttachment.filename}`));
+  const learningFileRecord = db.prepare('SELECT user_id,filename FROM learning_files WHERE id=?')
+    .get(uploadedLearningFiles.result[0].id);
+  assert.ok(entries.includes(`learning-uploads/${learningFileRecord.user_id}/${learningFileRecord.filename}`));
 
   const invalidForm = new FormData();
   invalidForm.append('backup', new Blob(['not a zip'], { type: 'application/zip' }), 'invalid.zip');
@@ -470,6 +687,7 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
 
   fs.rmSync(path.join(testDirectory, 'uploads', coverFilename), { force: true });
   fs.rmSync(path.join(testDirectory, 'audio', '1', audioFilename), { force: true });
+  fs.rmSync(path.join(testDirectory, 'learning-uploads', String(learningFileRecord.user_id), learningFileRecord.filename), { force: true });
   const restoreForm = new FormData();
   restoreForm.append('backup', new Blob([Buffer.from(downloaded.result)], { type: 'application/zip' }), 'memo.zip');
   const restored = await request('/api/backups/restore-archive', {
@@ -481,6 +699,7 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.ok(fs.existsSync(path.join(testDirectory, 'uploads', coverFilename)));
   assert.ok(fs.existsSync(path.join(testDirectory, 'audio', '1', audioFilename)));
   assert.ok(fs.existsSync(path.join(testDirectory, 'club-uploads', String(backupClub.result.id), clubAttachment.filename)));
+  assert.ok(fs.existsSync(path.join(testDirectory, 'learning-uploads', String(learningFileRecord.user_id), learningFileRecord.filename)));
   assert.equal((await request('/api/auth/me', { cookie: ownerCookie })).response.status, 401);
 
   const login = await request('/api/auth/login', {
@@ -498,6 +717,12 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(restoredClub.result.books[0].my_status, 'completed');
   assert.equal(restoredClub.result.books[0].my_note, 'Backup progress');
   assert.ok(restoredClub.result.messages.some(message => message.content === 'Backup insight'));
+  const restoredFinance = await request('/api/finance?month=2024-01', { cookie: ownerCookie });
+  assert.equal(restoredFinance.result.summary.income, 4500);
+  assert.equal(restoredFinance.result.summary.expenses, 159.99);
+  assert.equal(restoredFinance.result.budgets[0].category, 'Food');
+  assert.ok(restoredFinance.result.subscriptions.some(subscription => subscription.name === 'Music'
+    && subscription.next_renewal_date === '2024-02-29'));
   assert.ok(restoredClub.result.messages.some(message => message.attachments.some(file => file.display_name === 'club-note.txt')));
   assert.equal(restoredClub.result.invites.length, 1);
   const restoredAttachment = restoredClub.result.messages.flatMap(message => message.attachments)
@@ -530,8 +755,35 @@ test('search results and owner backup controls remain account-scoped', async () 
   assert.equal(otherPreferences.result.markdownToolbarEnabled, true);
   assert.equal(otherPreferences.result.markdownImagePasteEnabled, true);
   assert.equal(otherPreferences.result.fontSizeOffset, 0);
+  assert.equal(otherPreferences.result.language, 'ar');
+  assert.equal(otherPreferences.result.prayerLatitude, null);
+  assert.equal(otherPreferences.result.prayerMethod, 5);
+  assert.equal(otherPreferences.result.financeCurrency, 'EGP');
   assert.equal(otherPreferences.result.lineSpacing, 'comfortable');
   assert.equal(otherPreferences.result.fontFamily, 'plex');
+  assert.deepEqual(otherPreferences.result.shortcuts, {
+    todo: 'Ctrl+Alt+Shift+KeyT',
+    dailyNote: 'Ctrl+Alt+Shift+KeyD',
+    readLater: 'Ctrl+Alt+Shift+KeyR',
+    quickCreate: 'Ctrl+Alt+Shift+KeyQ',
+  });
+  assert.deepEqual((await request('/api/snippets', { cookie: otherCookie })).result, []);
+  const otherFinance = await request('/api/finance?month=2024-01', { cookie: otherCookie });
+  assert.equal(otherFinance.result.currency, 'EGP');
+  assert.equal(otherFinance.result.transactions.length, 0);
+  assert.equal(otherFinance.result.subscriptions.length, 0);
+  assert.equal(otherFinance.result.budgets.length, 0);
+  const ownerTransactionId = db.prepare(`SELECT t.id FROM finance_transactions t
+    JOIN users u ON u.id=t.user_id WHERE u.username='owner_test' AND t.description='Salary'`).get().id;
+  assert.equal((await request(`/api/finance/transactions/${ownerTransactionId}`, {
+    method: 'DELETE', cookie: otherCookie,
+  })).response.status, 404);
+  const otherIncome = await jsonRequest('/api/finance/transactions', 'POST', {
+    type: 'income', description: 'Other account', amount: 20, transaction_date: '2024-01-05',
+  }, otherCookie);
+  assert.equal(otherIncome.response.status, 201);
+  const isolatedFinance = await request('/api/finance?month=2024-01', { cookie: otherCookie });
+  assert.deepEqual(isolatedFinance.result.transactions.map(transaction => transaction.description), ['Other account']);
   assert.deepEqual(search.result.articles, []);
   assert.deepEqual((await request('/api/areas', { cookie: otherCookie })).result, []);
   assert.deepEqual((await request('/api/goals', { cookie: otherCookie })).result, []);

@@ -1,6 +1,17 @@
 const KIND_LABELS = { memo: 'مذكرة', book: 'كتاب', game: 'لعبة', movie: 'فيلم' };
 const KIND_ICONS = { memo: '✍️', book: '📚', game: '🎮', movie: '🎬' };
-const workspaceViews = new Set(['today', 'todos', 'calendar', 'planning', 'habits', 'library', 'articles', 'bookmarks', 'timeline', 'clubs', 'daily-notes', 'pinned', 'gallery']);
+const workspaceViews = new Set(['today', 'todos', 'calendar', 'planning', 'habits', 'library', 'articles', 'bookmarks', 'snippets', 'learning', 'finance', 'timeline', 'clubs', 'daily-notes', 'pinned', 'gallery']);
+const shortcutChoices = [
+  ['', 'غير معين'],
+  ['Ctrl+Alt+Shift+KeyA', 'Ctrl + Alt + Shift + A'],
+  ['Ctrl+Alt+Shift+KeyB', 'Ctrl + Alt + Shift + B'],
+  ['Ctrl+Alt+Shift+KeyD', 'Ctrl + Alt + Shift + D'],
+  ['Ctrl+Alt+Shift+KeyL', 'Ctrl + Alt + Shift + L'],
+  ['Ctrl+Alt+Shift+KeyN', 'Ctrl + Alt + Shift + N'],
+  ['Ctrl+Alt+Shift+KeyQ', 'Ctrl + Alt + Shift + Q'],
+  ['Ctrl+Alt+Shift+KeyR', 'Ctrl + Alt + Shift + R'],
+  ['Ctrl+Alt+Shift+KeyT', 'Ctrl + Alt + Shift + T'],
+];
 const requestedWorkspace = location.hash.slice(1);
 const STATUS_LABELS = {
   planned: 'في القائمة',
@@ -22,6 +33,12 @@ let items = [];
 let todos = [];
 let articles = [];
 let bookmarks = [];
+let bookmarkCategoryFilter = '';
+let codeSnippets = [];
+let snippetLanguageFilter = '';
+let learningTopics = [];
+let activeLearningTopic = null;
+let learningLoadVersion = 0;
 let pinnedEntries = [];
 let noteIndex = [];
 let galleryImages = [];
@@ -47,6 +64,13 @@ let weeklyReview = null;
 let metrics = null;
 let activeWorkspace = workspaceViews.has(requestedWorkspace) ? requestedWorkspace : 'today';
 let todoFilter = 'all';
+let articleFilter = 'all';
+let shortcuts = {
+  todo: 'Ctrl+Alt+Shift+KeyT',
+  dailyNote: 'Ctrl+Alt+Shift+KeyD',
+  readLater: 'Ctrl+Alt+Shift+KeyR',
+  quickCreate: 'Ctrl+Alt+Shift+KeyQ',
+};
 let selectedKind = 'all';
 let editingId = null;
 let editingEventId = null;
@@ -73,6 +97,21 @@ let markdownImagePasteEnabled = true;
 let fontSizeOffset = 0;
 let lineSpacing = 'comfortable';
 let fontFamily = 'plex';
+let language = 'ar';
+let prayerLocation = { latitude: null, longitude: null, label: '', method: 5 };
+let prayerTimesData = null;
+let prayerTimesLoadedKey = '';
+let prayerTimesRequest = null;
+let prayerTimesRefreshTimer = null;
+let financeData = null;
+let financeLoadVersion = 0;
+let quranSurahsRequest = null;
+let quranRadiosLoaded = false;
+const formatLocale = () => language === 'en' ? 'en-US' : 'ar-EG';
+const applyLanguage = value => {
+  language = value === 'en' ? 'en' : 'ar';
+  window.personalMemoLanguage.set(language);
+};
 const initialToday = new Date();
 let calendarMonth = new Date(initialToday.getFullYear(), initialToday.getMonth(), 1, 12);
 let selectedCalendarDate = `${initialToday.getFullYear()}-${String(initialToday.getMonth() + 1).padStart(2, '0')}-${String(initialToday.getDate()).padStart(2, '0')}`;
@@ -88,8 +127,8 @@ const notifiedOverdueTodos = new Set();
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[char]));
-const arabicNumber = value => String(value).replace(/\d/g, digit => '٠١٢٣٤٥٦٧٨٩'[digit]);
-const formatDate = value => value ? new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`)) : '';
+const arabicNumber = value => language === 'en' ? String(value) : String(value).replace(/\d/g, digit => '٠١٢٣٤٥٦٧٨٩'[digit]);
+const formatDate = value => value ? new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`)) : '';
 const actionIcons = {
   edit: '<path d="m4 16.5-.8 4.3 4.3-.8L20 7.5 16.5 4 4 16.5Z"/><path d="m14.8 5.7 3.5 3.5"/>',
   delete: '<path d="M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3"/>',
@@ -354,8 +393,20 @@ function applyAutoDirection(root = document) {
 
 function showAuthentication(user, message = '') {
   const previousUserId = currentUser?.id;
+  if (previousUserId && previousUserId !== user?.id) {
+    prayerTimesRequest?.abort();
+    prayerTimesRequest = null;
+    prayerLocation = { latitude: null, longitude: null, label: '', method: 5 };
+    prayerTimesData = null;
+    prayerTimesLoadedKey = '';
+    financeData = null;
+    financeLoadVersion += 1;
+    if (prayerTimesRefreshTimer) clearInterval(prayerTimesRefreshTimer);
+    prayerTimesRefreshTimer = null;
+  }
   currentUser = user;
   const authenticated = Boolean(user);
+  if (!authenticated) applyLanguage('ar');
   document.getElementById('authScreen').classList.toggle('hidden', authenticated);
   document.getElementById('appShell').classList.toggle('hidden', !authenticated);
   document.getElementById('userName').textContent = authenticated ? user.username : '';
@@ -407,6 +458,8 @@ function setWorkspaceView(view, updateHash = false) {
   });
   if (updateHash && location.hash !== `#${view}`) history.pushState(null, '', `#${view}`);
   if (view === 'today') document.title = 'مذكرتي';
+  if (view === 'learning' && currentUser) renderLearningHub();
+  if (view === 'finance' && currentUser) loadFinance();
   if (view === 'timeline' && currentUser) renderTimeline();
   if (view === 'daily-notes' && currentUser) {
     const requestedDate = document.getElementById('dailyNoteDate').value || localToday();
@@ -420,6 +473,336 @@ function setWorkspaceView(view, updateHash = false) {
     if (activeClubId) loadBookClub(activeClubId);
   }
   return true;
+}
+
+function locationDate(timeZone, date = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  }
+
+function parsePrayerClock(value) {
+    const match = String(value || '').match(/(\d{1,2}):(\d{2})/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+  }
+
+function renderPrayerTimes() {
+  const status = document.getElementById('prayerTimesStatus');
+    const list = document.getElementById('prayerTimesList');
+    const summary = document.getElementById('prayerNextSummary');
+    const label = prayerLocation.label || (language === 'en' ? 'Prayer times' : 'مواقيت الصلاة');
+    document.getElementById('prayerPanelLocation').textContent = label;
+    document.getElementById('prayerPanelDate').textContent = new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'full' }).format(new Date());
+    if (prayerLocation.latitude === null || prayerLocation.longitude === null) {
+      summary.textContent = language === 'en' ? 'Set location' : 'اضبط موقعك';
+      status.textContent = language === 'en' ? 'Set a location to view prayer times.' : 'أضف موقعاً لعرض مواقيت الصلاة.';
+      list.innerHTML = '';
+      return;
+    }
+    if (!prayerTimesData) {
+      summary.textContent = language === 'en' ? 'Loading…' : 'جارٍ التحميل…';
+      if (!prayerTimesRequest) {
+        status.textContent = language === 'en' ? 'Prayer times are not loaded yet.' : 'لم تُحمّل المواقيت بعد.';
+      }
+      list.innerHTML = '';
+      return;
+    }
+
+    const timezone = prayerTimesData.meta?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const nowParts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date());
+    const localTime = Number(nowParts.find(part => part.type === 'hour')?.value || 0) * 60
+      + Number(nowParts.find(part => part.type === 'minute')?.value || 0);
+    const prayers = [
+      ['Fajr', 'الفجر'],
+      ['Sunrise', 'الشروق'],
+      ['Dhuhr', 'الظهر'],
+      ['Asr', 'العصر'],
+      ['Maghrib', 'المغرب'],
+      ['Isha', 'العشاء'],
+    ].map(([key, arabic]) => ({
+      key,
+      name: language === 'en' ? key : arabic,
+      time: prayerTimesData.timings?.[key],
+      minutes: parsePrayerClock(prayerTimesData.timings?.[key]),
+    })).filter(prayer => prayer.minutes !== null);
+    const nextPrayer = prayers.find(prayer => prayer.key !== 'Sunrise' && prayer.minutes > localTime)
+      || prayers.find(prayer => prayer.key === 'Fajr');
+    summary.textContent = nextPrayer
+      ? `${nextPrayer.name} ${nextPrayer.time.match(/\d{1,2}:\d{2}/)?.[0] || nextPrayer.time}`
+      : (language === 'en' ? 'Times available' : 'المواقيت متاحة');
+    status.textContent = prayerTimesData.date?.readable || new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'medium' }).format(new Date());
+    list.innerHTML = prayers.map(prayer => `<div class="prayer-times-row${prayer.key === nextPrayer?.key ? ' is-next' : ''}">
+      <span>${prayer.name}</span><time dir="ltr">${escapeHtml(prayer.time.match(/\d{1,2}:\d{2}/)?.[0] || prayer.time)}</time>
+    </div>`).join('');
+  }
+
+async function loadPrayerTimes(force = false) {
+    if (prayerLocation.latitude === null || prayerLocation.longitude === null) {
+      prayerTimesData = null;
+      prayerTimesLoadedKey = '';
+      renderPrayerTimes();
+      return;
+    }
+    const timezone = prayerTimesData?.meta?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const currentDate = locationDate(timezone);
+    const key = `${currentDate}|${prayerLocation.latitude}|${prayerLocation.longitude}|${prayerLocation.method}`;
+    if (!force && prayerTimesLoadedKey === key) {
+      renderPrayerTimes();
+      return;
+    }
+    prayerTimesRequest?.abort();
+    const controller = new AbortController();
+    prayerTimesRequest = controller;
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    document.getElementById('prayerTimesStatus').textContent = language === 'en' ? 'Loading prayer times…' : 'جارٍ تحميل مواقيت الصلاة…';
+    try {
+      const dateParts = currentDate.split('-');
+      const apiDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
+      const params = new URLSearchParams({
+        latitude: String(prayerLocation.latitude),
+        longitude: String(prayerLocation.longitude),
+        method: String(prayerLocation.method),
+      });
+      const response = await fetch(`https://api.aladhan.com/v1/timings/${apiDate}?${params}`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Prayer times service returned ${response.status}.`);
+      const result = await response.json();
+      if (result.code !== 200 || !result.data?.timings) throw new Error('Prayer times are unavailable for this location.');
+      if (prayerTimesRequest !== controller) return;
+      prayerTimesData = result.data;
+      prayerTimesLoadedKey = key;
+      renderPrayerTimes();
+    } catch (error) {
+      if (prayerTimesRequest !== controller) return;
+      prayerTimesData = null;
+      prayerTimesLoadedKey = '';
+      const message = error.name === 'AbortError'
+        ? (language === 'en' ? 'Prayer times request timed out. Try refreshing.' : 'انتهت مهلة طلب المواقيت. حاول التحديث.')
+        : (language === 'en' ? `Could not load prayer times: ${error.message}` : `تعذّر تحميل مواقيت الصلاة: ${error.message}`);
+      document.getElementById('prayerNextSummary').textContent = language === 'en' ? 'Unavailable' : 'غير متاحة';
+      document.getElementById('prayerTimesStatus').textContent = message;
+      document.getElementById('prayerTimesList').innerHTML = '';
+    } finally {
+      clearTimeout(timeout);
+      if (prayerTimesRequest === controller) prayerTimesRequest = null;
+    }
+  }
+function financeMoney(amount, currency = financeData?.currency || 'EGP') {
+  return new Intl.NumberFormat(formatLocale(), { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount || 0);
+}
+
+function renderFinance() {
+  if (!financeData) return;
+  const { summary, transactions, subscriptions, budgets, currency, month } = financeData;
+  const labels = language === 'en'
+    ? ['Income', 'Expenses', 'Balance', 'Monthly subscriptions']
+    : ['الدخل', 'المصروفات', 'الرصيد', 'الاشتراكات شهرياً'];
+  document.getElementById('financeMonthLabel').textContent = new Intl.DateTimeFormat(formatLocale(), { month: 'long', year: 'numeric' })
+    .format(new Date(`${month}-01T12:00:00`));
+  document.getElementById('financeSummary').innerHTML = [
+    [labels[0], summary.income, 'income'],
+    [labels[1], summary.expenses, 'expense'],
+    [labels[2], summary.balance, summary.balance < 0 ? 'expense' : 'income'],
+    [labels[3], summary.monthlySubscriptions, 'subscription'],
+  ].map(([label, amount, kind]) => `<article class="finance-summary-card"><span>${label}</span><strong class="is-${kind}">${financeMoney(amount, currency)}</strong></article>`).join('');
+  const transactionEmpty = language === 'en' ? 'No transactions for this month yet.' : 'لا توجد عمليات مسجلة لهذا الشهر بعد.';
+  document.getElementById('financeTransactionList').innerHTML = transactions.length
+    ? transactions.map(transaction => `<article class="finance-transaction">
+        <div class="finance-transaction-copy"><strong>${escapeHtml(transaction.description)}</strong><span>${escapeHtml(transaction.category)} · ${formatDate(transaction.transaction_date)}</span></div>
+        <strong class="finance-amount is-${transaction.type}">${transaction.type === 'income' ? '+' : '−'}${financeMoney(transaction.amount, currency)}</strong>
+        <div class="finance-item-actions">
+          <button class="icon-action" type="button" data-finance-edit-transaction="${transaction.id}" aria-label="${language === 'en' ? 'Edit transaction' : 'تعديل العملية'}" title="${language === 'en' ? 'Edit' : 'تعديل'}">${actionIcon('edit')}</button>
+          <button class="icon-action is-danger" type="button" data-finance-delete-transaction="${transaction.id}" aria-label="${language === 'en' ? 'Delete transaction' : 'حذف العملية'}" title="${language === 'en' ? 'Delete' : 'حذف'}">${actionIcon('delete')}</button>
+        </div>
+      </article>`).join('')
+    : `<p class="finance-empty">${transactionEmpty}</p>`;
+  const budgetEmpty = language === 'en' ? 'No budgets for this month.' : 'لم تضف ميزانيات لهذا الشهر.';
+  document.getElementById('financeBudgetList').innerHTML = budgets.length
+    ? budgets.map(budget => {
+      const percent = Math.min(100, Math.round(budget.spent / budget.amount * 100));
+      return `<article class="finance-budget"><div><strong>${escapeHtml(budget.category)}</strong><span>${financeMoney(budget.spent, currency)} / ${financeMoney(budget.amount, currency)}</span></div>
+        <div class="finance-budget-track" role="progressbar" aria-label="${escapeHtml(budget.category)}" aria-valuemin="0" aria-valuemax="${budget.amount}" aria-valuenow="${budget.spent}"><span class="${budget.spent > budget.amount ? 'is-over' : ''}" style="width:${percent}%"></span></div>
+        <button class="finance-text-action" type="button" data-finance-delete-budget="${budget.id}">${language === 'en' ? 'Remove budget' : 'حذف الميزانية'}</button></article>`;
+    }).join('')
+    : `<p class="finance-empty">${budgetEmpty}</p>`;
+  const subscriptionEmpty = language === 'en' ? 'No subscriptions saved yet.' : 'لا توجد اشتراكات محفوظة بعد.';
+  document.getElementById('financeSubscriptionList').innerHTML = subscriptions.length
+    ? subscriptions.map(subscription => `<article class="finance-subscription${subscription.status === 'active' ? '' : ' is-inactive'}">
+        <div class="finance-transaction-copy"><strong>${escapeHtml(subscription.name)}</strong><span>${financeMoney(subscription.amount, subscription.currency)} · ${subscription.billing_cycle === 'monthly' ? (language === 'en' ? 'monthly' : 'شهري') : (language === 'en' ? 'yearly' : 'سنوي')} · ${language === 'en' ? 'Next' : 'التالي'} ${formatDate(subscription.next_renewal_date)}</span></div>
+        <div class="finance-item-actions">
+          ${subscription.status === 'active' ? `<button class="small-button" type="button" data-finance-pay-subscription="${subscription.id}">${language === 'en' ? 'Mark paid' : 'تسجيل الدفع'}</button>` : ''}
+          <button class="icon-action" type="button" data-finance-edit-subscription="${subscription.id}" aria-label="${language === 'en' ? 'Edit subscription' : 'تعديل الاشتراك'}">${actionIcon('edit')}</button>
+          <button class="icon-action is-danger" type="button" data-finance-delete-subscription="${subscription.id}" aria-label="${language === 'en' ? 'Delete subscription' : 'حذف الاشتراك'}">${actionIcon('delete')}</button>
+        </div>
+      </article>`).join('')
+    : `<p class="finance-empty">${subscriptionEmpty}</p>`;
+}
+
+async function loadFinance() {
+  const version = ++financeLoadVersion;
+  const monthInput = document.getElementById('financeMonth');
+  if (!monthInput.value) monthInput.value = localToday().slice(0, 7);
+  try {
+    const result = await api(`/api/finance?month=${encodeURIComponent(monthInput.value)}`);
+    if (version !== financeLoadVersion) return;
+    financeData = result;
+    renderFinance();
+  } catch (error) {
+    if (version === financeLoadVersion) {
+      document.getElementById('financeSummary').innerHTML = `<p class="finance-empty">${escapeHtml(error.message)}</p>`;
+    }
+  }
+}
+
+function openFinanceDialog(mode, record = null) {
+  const dialog = document.getElementById('financeDialog');
+  const form = document.getElementById('financeForm');
+  form.reset();
+  form.elements.id.value = record?.id || '';
+  form.elements.mode.value = mode;
+  const isTransaction = mode === 'transaction';
+  const isSubscription = mode === 'subscription';
+  const editing = Boolean(record);
+  document.getElementById('financeDialogTitle').textContent = ({
+    transaction: editing ? (language === 'en' ? 'Edit transaction' : 'تعديل عملية') : (language === 'en' ? 'New transaction' : 'عملية جديدة'),
+    subscription: editing ? (language === 'en' ? 'Edit subscription' : 'تعديل اشتراك') : (language === 'en' ? 'New subscription' : 'اشتراك جديد'),
+    budget: language === 'en' ? 'Set a monthly budget' : 'تحديد ميزانية شهرية',
+  })[mode];
+  document.getElementById('financeTypeField').classList.toggle('hidden', !isTransaction);
+  document.getElementById('financeDescriptionField').classList.toggle('hidden', !isTransaction);
+  document.getElementById('financeNameField').classList.toggle('hidden', !isSubscription);
+  document.getElementById('financeDateField').classList.toggle('hidden', !isTransaction);
+  document.getElementById('financeRenewalField').classList.toggle('hidden', !isSubscription);
+  document.getElementById('financeCycleField').classList.toggle('hidden', !isSubscription);
+  document.getElementById('financeStatusField').classList.toggle('hidden', !isSubscription);
+  document.getElementById('financeMonthField').classList.toggle('hidden', mode !== 'budget');
+  document.getElementById('financeNotesField').classList.toggle('hidden', mode === 'budget');
+  form.elements.description.required = isTransaction;
+  form.elements.name.required = isSubscription;
+  form.elements.transaction_date.required = isTransaction;
+  form.elements.next_renewal_date.required = isSubscription;
+  form.elements.month.required = mode === 'budget';
+  form.elements.category.value = record?.category || (isSubscription ? 'اشتراكات' : 'عام');
+  form.elements.amount.value = record?.amount ?? '';
+  form.elements.description.value = record?.description || '';
+  form.elements.name.value = record?.name || '';
+  form.elements.type.value = record?.type || 'expense';
+  form.elements.transaction_date.value = record?.transaction_date || localToday();
+  form.elements.next_renewal_date.value = record?.next_renewal_date || localToday();
+  form.elements.billing_cycle.value = record?.billing_cycle || 'monthly';
+  form.elements.status.value = record?.status || 'active';
+  form.elements.month.value = document.getElementById('financeMonth').value || localToday().slice(0, 7);
+  form.elements.notes.value = record?.notes || '';
+  dialog.showModal();
+}
+
+async function submitFinanceForm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  const mode = values.mode;
+  const id = values.id;
+  let url;
+  let method;
+  let body;
+  if (mode === 'transaction') {
+    url = id ? `/api/finance/transactions/${id}` : '/api/finance/transactions';
+    method = id ? 'PUT' : 'POST';
+    body = { type: values.type, description: values.description, amount: values.amount, category: values.category, transaction_date: values.transaction_date, notes: values.notes };
+  } else if (mode === 'subscription') {
+    url = id ? `/api/finance/subscriptions/${id}` : '/api/finance/subscriptions';
+    method = id ? 'PUT' : 'POST';
+    body = { name: values.name, amount: values.amount, category: values.category, next_renewal_date: values.next_renewal_date, billing_cycle: values.billing_cycle, status: values.status, notes: values.notes };
+  } else {
+    url = '/api/finance/budgets';
+    method = 'PUT';
+    body = { month: values.month, category: values.category, amount: values.amount };
+  }
+  try {
+    await api(url, { method, body: JSON.stringify(body) });
+    document.getElementById('financeDialog').close();
+    await loadFinance();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function loadQuranSurahs() {
+  const select = document.getElementById('quranSurahSelect');
+  if (select.options.length > 1 || quranSurahsRequest) return;
+  const controller = new AbortController();
+  quranSurahsRequest = controller;
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  select.innerHTML = `<option value="">${language === 'en' ? 'Loading chapters…' : 'جارٍ تحميل السور…'}</option>`;
+  try {
+    const response = await fetch('https://api.alquran.cloud/v1/surah', { signal: controller.signal });
+    if (!response.ok) throw new Error(`Surah service returned ${response.status}.`);
+    const result = await response.json();
+    if (!Array.isArray(result.data) || !result.data.length) throw new Error('No surahs were returned.');
+    select.innerHTML = `<option value="">${language === 'en' ? 'Choose a surah' : 'اختر سورة'}</option>` + result.data.map(surah =>
+      `<option value="${surah.number}">${surah.number}. ${escapeHtml(surah.name)} — ${escapeHtml(surah.englishName)}</option>`).join('');
+    if (select.value) setQuranSurahAudio();
+  } catch (error) {
+    select.innerHTML = `<option value="">${language === 'en' ? 'Could not load surahs' : 'تعذّر تحميل السور'}</option>`;
+    document.getElementById('quranPlayerStatus').textContent = language === 'en'
+      ? `Could not load surahs: ${error.message}` : `تعذّر تحميل السور: ${error.message}`;
+  } finally {
+    clearTimeout(timeout);
+    if (quranSurahsRequest === controller) quranSurahsRequest = null;
+  }
+}
+
+function setQuranSurahAudio() {
+  const surah = document.getElementById('quranSurahSelect').value;
+  if (!surah) return;
+  const reciter = document.getElementById('quranReciterSelect').value;
+  const audio = document.getElementById('quranAudio');
+  audio.src = `https://cdn.islamic.network/quran/audio-surah/128/${encodeURIComponent(reciter)}/${encodeURIComponent(surah)}.mp3`;
+  audio.load();
+  document.getElementById('quranPlayerStatus').textContent = language === 'en' ? 'Surah ready. Press play to listen.' : 'السورة جاهزة. اضغط تشغيل للاستماع.';
+}
+
+async function loadQuranRadios() {
+  if (quranRadiosLoaded) return;
+  const select = document.getElementById('quranRadioSelect');
+  select.innerHTML = `<option value="">${language === 'en' ? 'Loading stations…' : 'جارٍ تحميل الإذاعات…'}</option>`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch('https://mp3quran.net/api/v3/radios?language=ar', { signal: controller.signal });
+    if (!response.ok) throw new Error(`Radio service returned ${response.status}.`);
+    const result = await response.json();
+    const radios = result.radios;
+    if (!Array.isArray(radios)) throw new Error('Radio service returned an invalid station list.');
+    const validRadios = radios.filter(radio => {
+      try {
+        return typeof radio.name === 'string' && new URL(radio.url).protocol === 'https:';
+      } catch {
+        return false;
+      }
+    });
+    const sortedRadios = [...validRadios].sort((a, b) =>
+      Number(/القرآن|quran|قرآن/i.test(b.name)) - Number(/القرآن|quran|قرآن/i.test(a.name)));
+    select.innerHTML = `<option value="">${language === 'en' ? 'Choose a station' : 'اختر إذاعة'}</option>` + sortedRadios.map(radio =>
+      `<option value="${escapeHtml(radio.url)}">${escapeHtml(radio.name)}</option>`).join('');
+    quranRadiosLoaded = true;
+    if (!validRadios.length) throw new Error('No valid radio stations are available.');
+  } catch (error) {
+    select.innerHTML = `<option value="">${language === 'en' ? 'Could not load stations' : 'تعذّر تحميل الإذاعات'}</option>`;
+    document.getElementById('quranPlayerStatus').textContent = language === 'en'
+      ? `Could not load radio stations: ${error.message}` : `تعذّر تحميل الإذاعات: ${error.message}`;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function setWritingFocusMode(enabled) {
@@ -596,7 +979,7 @@ function renderTodos() {
 }
 
 function dateHeading(value) {
-  return new Intl.DateTimeFormat('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' })
+  return new Intl.DateTimeFormat(formatLocale(), { weekday: 'long', day: 'numeric', month: 'long' })
     .format(new Date(`${value}T12:00:00`));
 }
 
@@ -629,7 +1012,7 @@ function renderCalendar() {
   const month = calendarMonth.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const monthTitle = new Intl.DateTimeFormat('ar-EG', { month: 'long', year: 'numeric' }).format(calendarMonth);
+  const monthTitle = new Intl.DateTimeFormat(formatLocale(), { month: 'long', year: 'numeric' }).format(calendarMonth);
   const eventsByDate = new Map();
   events.forEach(event => {
     const onDate = eventsByDate.get(event.occurrence_date) || [];
@@ -829,7 +1212,7 @@ function renderHabitsAndRoutines() {
       </div>
       <div class="habit-week-row" aria-label="إنجازات الأسبوع">
         ${week.map(day => {
-          const label = new Intl.DateTimeFormat('ar-EG', { weekday: 'short' }).format(new Date(`${day.date}T12:00:00`));
+          const label = new Intl.DateTimeFormat(formatLocale(), { weekday: 'short' }).format(new Date(`${day.date}T12:00:00`));
           const isToday = day.date === localToday();
           return `<span class="habit-week-day${day.completed ? ' completed' : ''}${isToday ? ' is-today' : ''}" title="${escapeHtml(dateHeading(day.date))}">
             <i>${day.completed ? '✓' : ''}</i><small>${escapeHtml(label)}</small></span>`;
@@ -1068,41 +1451,89 @@ const articleStatuses = { unread: 'للقراءة لاحقاً', reading: 'أق�
 
 function renderArticles() {
   const list = document.getElementById('articlesList');
-  list.innerHTML = articles.length ? articles.map(article => `
-    <article id="article-${article.id}" class="article-card">
-      <div class="article-card-heading"><div><span class="status status-${article.status}">${articleStatuses[article.status]}</span>
-        <h3 dir="auto">${escapeHtml(article.title)}</h3></div>
+  const counts = {
+    all: articles.length,
+    unread: articles.filter(article => article.status === 'unread').length,
+    reading: articles.filter(article => article.status === 'reading').length,
+    read: articles.filter(article => article.status === 'read').length,
+  };
+  for (const [key, count] of Object.entries(counts)) {
+    const target = document.getElementById(`articleCount${key[0].toUpperCase()}${key.slice(1)}`);
+    if (target) target.textContent = arabicNumber(count);
+  }
+  document.querySelectorAll('[data-article-filter]').forEach(button => {
+    const selected = button.dataset.articleFilter === articleFilter;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  const visible = articles.filter(article => articleFilter === 'all' || article.status === articleFilter);
+  document.getElementById('articlesSummary').textContent = articles.length
+    ? `${arabicNumber(articles.length)} محفوظة · ${arabicNumber(counts.unread)} بانتظار القراءة`
+    : 'احتفظ بالمقالات والصفحات التي تريد العودة إليها.';
+  list.innerHTML = visible.length ? visible.map(article => {
+    let domain = article.url;
+    try { domain = new URL(article.url).hostname.replace(/^www\./, ''); } catch {}
+    const nextStatus = article.status === 'unread' ? 'reading' : article.status === 'reading' ? 'read' : 'unread';
+    const nextStatusLabel = article.status === 'read' ? 'إعادة إلى القائمة' : article.status === 'reading' ? 'تمت القراءة' : 'ابدأ القراءة';
+    return `<article id="article-${article.id}" class="article-card">
+      <div class="article-card-heading"><div class="article-card-title"><span class="status status-${article.status}">${articleStatuses[article.status]}</span>
+        <h3 dir="auto">${escapeHtml(article.title)}</h3><span class="article-domain" dir="ltr">${escapeHtml(domain)}</span></div>
         <div class="article-actions">${pinButton('article', article.id, article.title)}<a class="small-button" href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer">فتح الصفحة</a>
-          <button class="small-button" type="button" data-article-edit="${article.id}">مراجعة وتعديل</button>
+          <button class="small-button" type="button" data-article-status="${article.id}" data-next-status="${nextStatus}">${nextStatusLabel}</button>
+          <button class="small-button" type="button" data-article-edit="${article.id}">ملاحظات</button>
           <button class="small-button danger" type="button" data-article-delete="${article.id}">حذف</button></div>
       </div>
       ${article.description ? `<p class="article-description" dir="auto">${escapeHtml(article.description)}</p>` : ''}
-      ${article.excerpt ? `<div class="article-excerpt"><span>مقتطف محفوظ</span>${textBlock(article.excerpt)}</div>` : ''}
+      ${article.excerpt ? `<details class="article-excerpt"><summary>عرض المقتطف المحفوظ</summary>${textBlock(article.excerpt)}</details>` : ''}
       ${article.review ? `<div class="review">${textBlock(article.review, true)}</div>` : ''}
-    </article>
-  `).join('') : '<div class="empty"><strong>قائمة القراءة فارغة</strong>احفظ صفحة من إضافة Chrome أو أضف رابطاً يدوياً.<p><button class="small-button" type="button" data-empty-action="article">＋ حفظ رابط</button></p></div>';
+    </article>`;
+  }).join('') : articles.length
+    ? '<div class="empty"><strong>لا توجد عناصر في هذا القسم</strong>جرّب حالة أخرى أو غيّر حالة مقال من بطاقته.</div>'
+    : '<div class="empty"><strong>قائمة القراءة فارغة</strong>احفظ صفحة من إضافة Chrome أو أضف رابطاً يدوياً.<p><button class="small-button" type="button" data-empty-action="article">＋ حفظ رابط</button></p></div>';
   applyAutoDirection(list);
 }
 
 function renderBookmarks() {
   const list = document.getElementById('bookmarksList');
   const query = document.getElementById('bookmarkSearch').value.trim().toLocaleLowerCase();
-  const visible = bookmarks.filter(bookmark => !query
-    || `${bookmark.title} ${bookmark.url} ${bookmark.note}`.toLocaleLowerCase().includes(query));
+  const categories = [...new Set(bookmarks.map(bookmark => bookmark.category || 'عام'))]
+    .sort((first, second) => first.localeCompare(second, 'ar'));
+  if (bookmarkCategoryFilter && !categories.includes(bookmarkCategoryFilter)) bookmarkCategoryFilter = '';
+  const categoryNav = document.getElementById('bookmarkCategories');
+  categoryNav.innerHTML = [
+    ['', 'الكل', bookmarks.length],
+    ...categories.map(category => [category, category, bookmarks.filter(bookmark => (bookmark.category || 'عام') === category).length]),
+  ].map(([value, label, count]) => `<button type="button" class="bookmark-category${bookmarkCategoryFilter === value ? ' is-active' : ''}"
+      data-bookmark-category="${escapeHtml(value)}" aria-pressed="${bookmarkCategoryFilter === value}">
+      <span>${escapeHtml(label)}</span><small>${arabicNumber(count)}</small></button>`).join('');
+  document.getElementById('bookmarkCategoryOptions').innerHTML = categories
+    .map(category => `<option value="${escapeHtml(category)}"></option>`).join('');
+  const visible = bookmarks.filter(bookmark => {
+    const matchesQuery = !query || `${bookmark.title} ${bookmark.url} ${bookmark.note} ${bookmark.category || ''}`
+      .toLocaleLowerCase().includes(query);
+    return matchesQuery && (!bookmarkCategoryFilter || (bookmark.category || 'عام') === bookmarkCategoryFilter);
+  });
   document.getElementById('bookmarksSummary').textContent = bookmarks.length
-    ? `${arabicNumber(bookmarks.length)} رابط محفوظ${query ? ` · ${arabicNumber(visible.length)} نتيجة` : ''}`
+    ? `${arabicNumber(bookmarks.length)} رابط محفوظ`
     : 'احفظ روابطك الأساسية لتصل إليها بسرعة.';
-  list.innerHTML = visible.length ? visible.map(bookmark => {
+  document.getElementById('bookmarkResultsSummary').textContent = query
+    ? `${arabicNumber(visible.length)} نتيجة من ${arabicNumber(bookmarks.length)}`
+    : bookmarks.length ? 'مصادرك مرتبة حسب مجموعاتك، مع معاينة وإجراءات سريعة.' : '';
+  const cardMarkup = bookmark => {
     const domain = (() => {
       try { return new URL(bookmark.url).hostname; } catch { return bookmark.url; }
     })();
     return `<article class="bookmark-card">
+      <div class="bookmark-card-visual">
+        ${bookmark.image_url
+          ? `<img class="bookmark-card-image" src="${escapeHtml(bookmark.image_url)}" alt="" loading="lazy">`
+          : `<span class="bookmark-card-placeholder" aria-hidden="true">${escapeHtml(domain.slice(0, 1).toUpperCase())}</span>`}
+      </div>
       <div class="bookmark-card-main">
-        <span class="bookmark-icon" aria-hidden="true">${actionIcon('open')}</span>
         <div class="bookmark-card-copy">
-          ${bookmark.image_url ? `<img class="bookmark-card-image" src="${escapeHtml(bookmark.image_url)}" alt="" loading="lazy">` : ''}
           <span class="bookmark-domain" dir="ltr">${escapeHtml(domain)}</span>
           <h3 dir="auto"><a href="${escapeHtml(bookmark.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bookmark.title)}</a></h3>
+          <span class="bookmark-category-label">${escapeHtml(bookmark.category || 'عام')}</span>
           ${bookmark.note ? `<p dir="auto">${escapeHtml(bookmark.note)}</p>` : ''}
         </div>
       </div>
@@ -1114,8 +1545,128 @@ function renderBookmarks() {
         ${iconButton('delete', `حذف ${bookmark.title}`, `data-bookmark-delete="${bookmark.id}"`)}
       </div>
     </article>`;
-  }).join('') : `<div class="empty"><strong>${bookmarks.length ? 'لا توجد نتائج مطابقة' : 'ابدأ بمصادرك الأساسية'}</strong>${bookmarks.length ? 'جرّب كلمة أخرى أو امسح البحث.' : 'احفظ روابط العمل والتعلّم والأدوات التي تستخدمها باستمرار.'}<p><button class="small-button" type="button" data-empty-action="bookmark">＋ حفظ رابط مهم</button></p></div>`;
+  };
+  list.innerHTML = visible.length ? (() => {
+    const grouped = new Map();
+    visible.forEach(bookmark => {
+      const category = bookmark.category || 'عام';
+      if (!grouped.has(category)) grouped.set(category, []);
+      grouped.get(category).push(bookmark);
+    });
+    return [...grouped.entries()].map(([category, entries]) => `<section class="bookmark-group">
+      <header class="bookmark-group-heading"><h3>${escapeHtml(category)}</h3><span>${arabicNumber(entries.length)} روابط</span></header>
+      <div class="bookmark-group-cards">${entries.map(cardMarkup).join('')}</div>
+    </section>`).join('');
+  })() : `<div class="empty"><strong>${bookmarks.length ? 'لا توجد نتائج مطابقة' : 'ابدأ بمصادرك الأساسية'}</strong>${bookmarks.length ? 'جرّب كلمة أخرى أو مجموعة مختلفة.' : 'احفظ روابط العمل والتعلّم والأدوات التي تستخدمها باستمرار.'}<p><button class="small-button" type="button" data-empty-action="bookmark">＋ حفظ رابط مهم</button></p></div>`;
   applyAutoDirection(list);
+}
+
+function renderCodeSnippets() {
+  const query = document.getElementById('snippetSearch').value.trim().toLocaleLowerCase();
+  const languages = [...new Set(codeSnippets.map(snippet => snippet.language.trim()).filter(Boolean))]
+    .sort((first, second) => first.localeCompare(second));
+  if (snippetLanguageFilter && !languages.includes(snippetLanguageFilter)) snippetLanguageFilter = '';
+  document.getElementById('snippetLanguageFilters').innerHTML = [
+    ['', 'الكل', codeSnippets.length],
+    ...languages.map(language => [language, language, codeSnippets.filter(snippet => snippet.language.trim() === language).length]),
+  ].map(([value, label, count]) => `<button type="button" class="snippet-language-filter${snippetLanguageFilter === value ? ' is-active' : ''}"
+    data-snippet-language="${escapeHtml(value)}" aria-pressed="${snippetLanguageFilter === value}">
+    <span>${escapeHtml(label)}</span><small>${arabicNumber(count)}</small></button>`).join('');
+  const visible = codeSnippets.filter(snippet => {
+    const matchesQuery = !query || `${snippet.title} ${snippet.language} ${snippet.description} ${snippet.code}`
+      .toLocaleLowerCase().includes(query);
+    return matchesQuery && (!snippetLanguageFilter || snippet.language.trim() === snippetLanguageFilter);
+  });
+  document.getElementById('snippetsSummary').textContent =
+    `${arabicNumber(codeSnippets.length)} مقطع محفوظ${query || snippetLanguageFilter ? ` · ${arabicNumber(visible.length)} نتيجة` : ''}`;
+  document.getElementById('snippetsList').innerHTML = visible.length ? visible.map(snippet => `
+    <article class="snippet-card">
+      <header class="snippet-card-heading">
+        <div class="snippet-card-title">
+          <span class="snippet-card-mark" aria-hidden="true">&lt;/&gt;</span>
+          <div><h3 dir="auto">${escapeHtml(snippet.title)}</h3><div class="snippet-meta">${snippet.language ? `<span>${escapeHtml(snippet.language)}</span>` : '<span>عام</span>'}${snippet.description ? `<p dir="auto">${escapeHtml(snippet.description)}</p>` : ''}</div></div>
+        </div>
+        <div class="snippet-actions">
+          ${iconButton('copy', 'نسخ الكود', `data-snippet-copy="${snippet.id}"`)}
+          ${iconButton('edit', 'تعديل المقطع', `data-snippet-edit="${snippet.id}"`)}
+          ${iconButton('delete', 'حذف المقطع', `data-snippet-delete="${snippet.id}"`)}
+        </div>
+      </header>
+      <div class="snippet-code-window">
+        <div class="snippet-code-toolbar" dir="ltr"><span class="snippet-window-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>${escapeHtml(snippet.language || 'CODE')}</span><span>${arabicNumber(snippet.code.split('\n').length)} أسطر</span></div>
+        <pre dir="ltr"><code>${escapeHtml(snippet.code)}</code></pre>
+      </div>
+    </article>`).join('') : `<div class="empty"><strong>${codeSnippets.length ? 'لا توجد نتائج مطابقة' : 'مكتبتك البرمجية جاهزة'}</strong>${codeSnippets.length ? 'جرّب البحث بكلمة أخرى.' : 'احفظ أوامر وأمثلة الكود التي تستخدمها يومياً لتعود إليها بسرعة.'}<p><button class="small-button" type="button" data-empty-action="snippet">＋ حفظ أول مقطع</button></p></div>`;
+}
+
+async function renderLearningHub() {
+  const learningStatusLabels = language === 'en'
+    ? { exploring: 'Exploring', learning: 'Learning', reviewed: 'Reviewed' }
+    : { exploring: 'استكشاف', learning: 'أتعلم الآن', reviewed: 'تمت المراجعة' };
+  const query = document.getElementById('learningSearch').value.trim().toLocaleLowerCase();
+  const visible = learningTopics.filter(topic =>
+    `${topic.title} ${topic.description}`.toLocaleLowerCase().includes(query));
+  document.getElementById('learningSummary').textContent =
+    language === 'en'
+      ? `${arabicNumber(learningTopics.length)} topics · ${arabicNumber(learningTopics.reduce((sum, topic) => sum + topic.note_count, 0))} notes`
+      : `${arabicNumber(learningTopics.length)} موضوع · ${arabicNumber(learningTopics.reduce((sum, topic) => sum + topic.note_count, 0))} ملاحظة`;
+  document.getElementById('learningTopicList').innerHTML = visible.length ? visible.map(topic => `
+    <button type="button" class="learning-topic-option${activeLearningTopic?.id === topic.id ? ' is-active' : ''}"
+      data-learning-topic="${topic.id}" aria-pressed="${activeLearningTopic?.id === topic.id}">
+      <span class="learning-topic-glyph" aria-hidden="true">✧</span>
+      <span class="learning-topic-option-copy"><strong dir="auto">${escapeHtml(topic.title)}</strong>
+        <small>${escapeHtml(learningStatusLabels[topic.status] || 'استكشاف')} · ${arabicNumber(topic.note_count)} ${language === 'en' ? 'notes' : 'ملاحظة'}</small></span>
+    </button>`).join('') : `<div class="learning-topic-empty">${learningTopics.length ? 'لا توجد موضوعات تطابق البحث.' : 'ابدأ بإنشاء موضوعك الأول.'}</div>`;
+  if (activeLearningTopic && !visible.some(topic => topic.id === activeLearningTopic.id)) activeLearningTopic = null;
+  if (!activeLearningTopic && visible.length) activeLearningTopic = { id: visible[0].id };
+  if (!activeLearningTopic) {
+    document.getElementById('learningTopicContent').innerHTML = `<div class="learning-welcome"><span aria-hidden="true">✧</span>
+      <p class="eyebrow">مساحة معرفة خاصة</p><h3>${learningTopics.length ? 'لا توجد نتيجة لهذا البحث' : 'اجمع ما تتعلمه في مكان واحد'}</h3>
+      <p>${learningTopics.length ? 'جرّب كلمة أخرى أو أزل البحث.' : 'أنشئ موضوعاً، ثم أضف إليه ملاحظات Markdown وملفات تساعدك على الفهم والرجوع للمعلومة.'}</p>
+      ${learningTopics.length ? '' : '<button class="button button-primary" type="button" data-learning-create-topic>＋ إنشاء موضوع</button>'}</div>`;
+    return;
+  }
+  const requestedId = activeLearningTopic.id;
+  const loadVersion = ++learningLoadVersion;
+  try {
+    const topic = await api(`/api/learning/topics/${requestedId}`);
+    if (loadVersion !== learningLoadVersion) return;
+    activeLearningTopic = topic;
+    document.getElementById('learningTopicList').querySelectorAll('[data-learning-topic]').forEach(button => {
+      const selected = Number(button.dataset.learningTopic) === topic.id;
+      button.classList.toggle('is-active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    const noteCount = topic.notes.length;
+    const fileCount = topic.notes.reduce((total, note) => total + note.files.length, 0);
+    document.getElementById('learningTopicContent').innerHTML = `
+      <header class="learning-topic-heading">
+        <div><span class="learning-status">${escapeHtml(learningStatusLabels[topic.status] || 'استكشاف')}</span>
+          <h3 dir="auto">${escapeHtml(topic.title)}</h3>${topic.description ? `<p dir="auto">${escapeHtml(topic.description)}</p>` : ''}
+          <small>${language === 'en' ? `${arabicNumber(noteCount)} notes · ${arabicNumber(fileCount)} files` : `${arabicNumber(noteCount)} ملاحظة · ${arabicNumber(fileCount)} ملف`}</small></div>
+        <div class="learning-topic-actions"><button class="icon-action" type="button" data-learning-edit-topic="${topic.id}" title="تعديل الموضوع" aria-label="تعديل الموضوع">${actionIcon('edit')}</button>
+          <button class="icon-action is-danger" type="button" data-learning-delete-topic="${topic.id}" title="حذف الموضوع" aria-label="حذف الموضوع">${actionIcon('delete')}</button>
+          <button class="button button-primary" type="button" data-learning-add-note="${topic.id}">＋ ملاحظة</button></div>
+      </header>
+      <div class="learning-notes-list">${topic.notes.length ? topic.notes.map(note => `
+        <article class="learning-note-card">
+          <header class="learning-note-heading"><div><h4 dir="auto">${escapeHtml(note.title)}</h4><time>${escapeHtml(new Date(note.updated_at).toLocaleDateString(formatLocale(), { dateStyle: 'medium' }))}</time></div>
+            <div class="learning-note-actions"><button class="icon-action" type="button" data-learning-edit-note="${note.id}" title="تعديل الملاحظة" aria-label="تعديل الملاحظة">${actionIcon('edit')}</button>
+              <button class="icon-action is-danger" type="button" data-learning-delete-note="${note.id}" title="حذف الملاحظة" aria-label="حذف الملاحظة">${actionIcon('delete')}</button></div>
+          </header>
+          ${note.body ? `<div class="learning-note-body markdown-preview">${renderRichText(note.body)}</div>` : '<p class="learning-note-empty">لا يوجد نص بعد.</p>'}
+          <div class="learning-note-files">${note.files.map(file => `<div class="learning-file">
+              <a href="${file.url}" class="learning-file-link"><span aria-hidden="true">${file.content_type === 'application/pdf' ? '▤' : '↗'}</span>
+                <span><strong dir="auto">${escapeHtml(file.display_name)}</strong><small>${(file.size / 1024 / 1024).toFixed(1)} MB</small></span></a>
+              <button class="icon-action is-danger" type="button" data-learning-delete-file="${file.id}" title="حذف الملف" aria-label="حذف ${escapeHtml(file.display_name)}">${actionIcon('delete')}</button>
+            </div>`).join('')}
+            <label class="learning-attach-button">＋ إرفاق ملف<input type="file" multiple data-learning-upload="${note.id}" accept=".pdf,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp"></label>
+          </div>
+        </article>`).join('') : `<div class="learning-notes-empty"><strong>هذا الموضوع جاهز لملاحظتك الأولى</strong><p>دوّن الفكرة، أضف مثالاً، أو أرفق ملفاً مرجعياً.</p><button class="button button-primary" type="button" data-learning-add-note="${topic.id}">＋ إضافة ملاحظة</button></div>`}</div>`;
+  } catch (error) {
+    if (loadVersion !== learningLoadVersion) return;
+    document.getElementById('learningTopicContent').innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 function renderNoteLinkPickers() {
@@ -1164,7 +1715,7 @@ function renderDailyNote() {
     aria-label="${isPinned('daily-note', dailyNote.id) ? 'إلغاء تثبيت مذكرة اليوم' : 'تثبيت مذكرة اليوم'}"
     aria-pressed="${isPinned('daily-note', dailyNote.id)}" title="تثبيت مذكرة اليوم">${actionIcon('pin')}</button>`;
   document.getElementById('dailyNoteSaveStatus').textContent = dailyNote.updated_at
-    ? `آخر حفظ ${new Date(dailyNote.updated_at).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}`
+    ? `${language === 'en' ? 'Last saved' : 'آخر حفظ'} ${new Date(dailyNote.updated_at).toLocaleTimeString(formatLocale(), { hour: 'numeric', minute: '2-digit' })}`
     : 'كل شيء اختياري. اكتب ما تريد فقط.';
   renderNoteLinkPickers();
   renderBacklinks(document.getElementById('dailyNoteBacklinks'), 'daily-note', dailyNote.note_date);
@@ -1203,7 +1754,7 @@ async function saveDailyNote() {
     dailyNote = savedNote;
     if (dailyNoteVersion !== savingVersion) return saveDailyNote();
     dailyNoteDirty = false;
-    status.textContent = `تم الحفظ ${new Date(savedNote.updated_at).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}`;
+    status.textContent = `${language === 'en' ? 'Saved' : 'تم الحفظ'} ${new Date(savedNote.updated_at).toLocaleTimeString(formatLocale(), { hour: 'numeric', minute: '2-digit' })}`;
     pinnedEntries = await api('/api/pins');
     noteIndex = await api('/api/note-index');
     renderPinnedEntries();
@@ -1324,17 +1875,33 @@ async function renderTimeline() {
   list.innerHTML = '<p class="field-hint">جارٍ جمع ذكريات هذه الفترة...</p>';
   try {
     const result = await api(`/api/timeline?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+    const days = new Map();
+    result.entries.forEach(entry => {
+      if (!days.has(entry.date)) days.set(entry.date, []);
+      days.get(entry.date).push(entry);
+    });
+    const typeCount = new Set(result.entries.map(entry => entry.type)).size;
     document.getElementById('timelineSummary').textContent =
-      `${arabicNumber(result.entries.length)} ذكرى من ${formatDate(result.start)} إلى ${formatDate(result.end)}`;
-    list.innerHTML = result.entries.length ? result.entries.map(entry => {
-      const [icon, label] = timelineTypes[entry.type] || ['•', 'نشاط'];
-      return `<article class="timeline-entry">
-        <time datetime="${escapeHtml(entry.date)}">${escapeHtml(formatDate(entry.date))}</time>
-        <span class="timeline-entry-icon" aria-hidden="true">${icon}</span>
-        <div><span class="timeline-entry-type">${label}</span><h3 dir="auto">${escapeHtml(entry.title)}</h3>
-          ${entry.detail ? `<p dir="auto">${escapeHtml(entry.detail)}</p>` : ''}</div>
-      </article>`;
-    }).join('') : '<div class="empty"><strong>لا توجد ذكريات في هذه الفترة بعد</strong>أكمل مهمة أو سجّل قراءة أو اكتب مذكرة لتبدأ قصتك بالظهور هنا.</div>';
+      `${arabicNumber(result.entries.length)} ذكرى · ${arabicNumber(days.size)} أيام · ${arabicNumber(typeCount)} أنواع نشاط · ${formatDate(result.start)} — ${formatDate(result.end)}`;
+    list.innerHTML = result.entries.length ? [...days.entries()].map(([date, entries]) => {
+      const dateObject = new Date(`${date}T12:00:00`);
+      const weekday = new Intl.DateTimeFormat(formatLocale(), { weekday: 'long' }).format(dateObject);
+      const types = [...new Set(entries.map(entry => (timelineTypes[entry.type] || ['•', 'نشاط'])[1]))];
+      return `<section class="timeline-day">
+        <header class="timeline-day-heading">
+          <div><span>${escapeHtml(weekday)}</span><h3>${escapeHtml(formatDate(date))}</h3></div>
+          <div class="timeline-day-meta"><span>${arabicNumber(entries.length)} ${entries.length === 1 ? 'ذكرى' : 'ذكريات'}</span><small>${types.map(escapeHtml).join(' · ')}</small></div>
+        </header>
+        <div class="timeline-day-entries">${entries.map(entry => {
+          const [icon, label] = timelineTypes[entry.type] || ['•', 'نشاط'];
+          return `<article class="timeline-entry timeline-entry-${escapeHtml(entry.type)}">
+            <span class="timeline-entry-icon" aria-hidden="true">${icon}</span>
+            <div><span class="timeline-entry-type">${escapeHtml(label)}</span><h4 dir="auto">${escapeHtml(entry.title)}</h4>
+              ${entry.detail ? `<p dir="auto">${escapeHtml(entry.detail)}</p>` : ''}</div>
+          </article>`;
+        }).join('')}</div>
+      </section>`;
+    }).join('') : '<div class="timeline-empty"><span aria-hidden="true">⌁</span><strong>الفترة دي لسه هادية</strong><p>أكمل مهمة، سجّل قراءة، أو اكتب مذكرة؛ وستظهر ذكرياتك هنا مرتبة حسب اليوم.</p></div>';
     applyAutoDirection(list);
   } catch (error) {
     list.innerHTML = `<p class="field-hint">${escapeHtml(error.message)}</p>`;
@@ -1427,7 +1994,7 @@ function renderBookClubDetails() {
     </div>
   </article>`).join('');
   const messages = activeClub.messages.map(message => `<article class="club-message${message.message_type === 'insight' ? ' is-insight' : ''}">
-    <div><strong dir="auto">${escapeHtml(message.username)}</strong><time>${escapeHtml(new Date(message.created_at).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }))}</time></div>
+    <div><strong dir="auto">${escapeHtml(message.username)}</strong><time>${escapeHtml(new Date(message.created_at).toLocaleString(formatLocale(), { dateStyle: 'medium', timeStyle: 'short' }))}</time></div>
     ${message.message_type === 'insight' ? '<span class="club-insight-label">رؤية</span>' : ''}
     ${message.content ? `<p dir="auto">${escapeHtml(message.content).replace(/(^|\s)(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>').replace(/(^|[^\w])(@[a-z0-9_]{3,32})\b/gi, '$1<strong class="club-mention">$2</strong>').replace(/\n/g, '<br>')}</p>` : ''}
     ${message.links?.length ? `<div class="club-message-links">${message.links.map(link => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHtml(link.title || link.url)}</a>`).join('')}</div>` : ''}
@@ -1443,7 +2010,7 @@ function renderBookClubDetails() {
       <div class="club-admin-heading"><div><h4>دعوات الأعضاء</h4><p>الروابط صالحة لمدة ٣٠ يوماً.</p></div>
         <span class="club-admin-count">${arabicNumber(activeClub.invites.length)}</span></div>
       ${activeClub.invites.length ? `<div class="club-invitation-list">${activeClub.invites.map(invite => `<div class="club-invitation">
-        <span class="club-invitation-status"><span class="club-status-dot"></span><span>تنتهي في <time datetime="${escapeHtml(invite.expires_at)}">${escapeHtml(new Date(invite.expires_at).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short', year: 'numeric' }))}</time></span></span>
+        <span class="club-invitation-status"><span class="club-status-dot"></span><span>${language === 'en' ? 'Expires on' : 'تنتهي في'} <time datetime="${escapeHtml(invite.expires_at)}">${escapeHtml(new Date(invite.expires_at).toLocaleDateString(formatLocale(), { day: 'numeric', month: 'short', year: 'numeric' }))}</time></span></span>
         <button class="small-button danger" type="button" data-club-invite-revoke="${invite.id}">إلغاء</button>
       </div>`).join('')}</div>` : '<p class="club-admin-empty">لا توجد دعوات نشطة حالياً.</p>'}
     </section>
@@ -1461,7 +2028,7 @@ function renderBookClubDetails() {
   </div>` : '';
   const metrics = activeClub.metrics;
   const meetings = activeClub.meetings.map(meeting => `<article class="club-meeting">
-    <div class="club-meeting-heading"><div><span class="eyebrow">${escapeHtml(new Date(meeting.starts_at).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }))}</span>
+    <div class="club-meeting-heading"><div><span class="eyebrow">${escapeHtml(new Date(meeting.starts_at).toLocaleString(formatLocale(), { dateStyle: 'medium', timeStyle: 'short' }))}</span>
       <h5 dir="auto">${escapeHtml(meeting.title)}</h5></div>
       ${meeting.meeting_url ? `<a class="small-button" href="${escapeHtml(meeting.meeting_url)}" target="_blank" rel="noopener noreferrer">رابط الاجتماع ↗</a>` : ''}
     </div>
@@ -1660,11 +2227,13 @@ async function refresh() {
 
 async function refreshWorkspace() {
   const calendarRange = calendarMonthRange();
-  [metrics, todos, articles, bookmarks, areas, goals, projects, events, reminderEvents, habits, routines, todayPlan, weeklyReview, bookClubs, bookClubNotifications, pinnedEntries, noteIndex, galleryImages] = await Promise.all([
+  [metrics, todos, articles, bookmarks, codeSnippets, learningTopics, areas, goals, projects, events, reminderEvents, habits, routines, todayPlan, weeklyReview, bookClubs, bookClubNotifications, pinnedEntries, noteIndex, galleryImages] = await Promise.all([
     api('/api/metrics'),
     api('/api/todos'),
     api('/api/articles'),
     api('/api/bookmarks'),
+    api('/api/snippets'),
+    api('/api/learning/topics'),
     api('/api/areas'),
     api('/api/goals'),
     api('/api/projects'),
@@ -1693,6 +2262,8 @@ async function refreshWorkspace() {
   renderTodos();
   renderArticles();
   renderBookmarks();
+  renderCodeSnippets();
+  if (activeWorkspace === 'learning') renderLearningHub();
   renderPinnedEntries();
   renderGallery();
   renderNoteLinkPickers();
@@ -1826,12 +2397,89 @@ function openBookmarkForm(bookmark = null) {
   form.elements.url.value = bookmark?.url || '';
   form.elements.image_url.value = bookmark?.image_url || '';
   form.elements.note.value = bookmark?.note || '';
+  form.elements.category.value = bookmark?.category || 'عام';
   const imagePreview = document.getElementById('bookmarkImagePreview');
   imagePreview.src = bookmark?.image_url || '';
   imagePreview.classList.toggle('hidden', !bookmark?.image_url);
   document.getElementById('bookmarkPreviewStatus').textContent = '';
   document.getElementById('bookmarkDialogTitle').textContent = bookmark ? 'تعديل الرابط' : 'حفظ رابط مهم';
   document.getElementById('bookmarkDialog').showModal();
+}
+
+function openSnippetForm(snippet = null) {
+  const form = document.getElementById('snippetForm');
+  form.reset();
+  form.elements.id.value = snippet?.id || '';
+  form.elements.title.value = snippet?.title || '';
+  form.elements.language.value = snippet?.language || '';
+  form.elements.description.value = snippet?.description || '';
+  form.elements.code.value = snippet?.code || '';
+  document.getElementById('snippetDialogTitle').textContent = snippet ? 'تعديل المقطع البرمجي' : 'حفظ مقطع برمجي';
+  document.getElementById('snippetDialog').showModal();
+  form.elements.title.focus();
+}
+
+function openLearningTopicForm(topic = null) {
+  const form = document.getElementById('learningTopicForm');
+  form.reset();
+  form.elements.id.value = topic?.id || '';
+  form.elements.title.value = topic?.title || '';
+  form.elements.description.value = topic?.description || '';
+  form.elements.status.value = topic?.status || 'exploring';
+  document.getElementById('learningTopicDialogTitle').textContent = topic ? 'تعديل موضوع التعلّم' : 'موضوع تعلّم جديد';
+  document.getElementById('learningTopicDialog').showModal();
+  form.elements.title.focus();
+}
+
+function openLearningNoteForm(topic, note = null) {
+  const form = document.getElementById('learningNoteForm');
+  form.reset();
+  form.elements.id.value = note?.id || '';
+  form.elements.topic_id.value = topic.id;
+  form.elements.title.value = note?.title || '';
+  form.elements.body.value = note?.body || '';
+  document.getElementById('learningNoteTopicName').textContent = topic.title;
+  document.getElementById('learningNoteDialogTitle').textContent = note ? 'تعديل الملاحظة' : 'ملاحظة جديدة';
+  const focusToggle = document.getElementById('learningNoteFocusToggle');
+  focusToggle.setAttribute('aria-pressed', 'false');
+  focusToggle.textContent = 'وضع التركيز';
+  document.getElementById('learningNoteDialog').classList.remove('learning-note-focus');
+  const noteUrl = new URL('/', location.origin);
+  noteUrl.searchParams.set('learning-note', note?.id || 'new');
+  noteUrl.searchParams.set('topic', topic.id);
+  document.getElementById('learningNoteOpenTab').href = noteUrl.href;
+  const body = document.getElementById('learningNoteBody');
+  const preview = document.getElementById('learningNotePreview');
+  body.classList.remove('hidden');
+  preview.classList.add('hidden');
+  document.getElementById('learningNotePreviewToggle').setAttribute('aria-pressed', 'false');
+  document.getElementById('learningNoteDialog').showModal();
+  form.elements.title.focus();
+}
+
+async function openRequestedLearningNote() {
+  const noteId = new URLSearchParams(location.search).get('learning-note');
+  if (!noteId) return;
+  const topicId = Number(new URLSearchParams(location.search).get('topic'));
+  const topic = learningTopics.find(entry => entry.id === topicId)
+    || learningTopics.find(entry => entry.notes?.some(note => String(note.id) === noteId));
+  if (!topic) {
+    showToast('لم نعثر على موضوع هذه الملاحظة.');
+    return;
+  }
+  activeLearningTopic = { id: topic.id };
+  setWorkspaceView('learning');
+  const detail = await api(`/api/learning/topics/${topic.id}`);
+  const note = detail.notes.find(entry => String(entry.id) === noteId);
+  if (!note && noteId !== 'new') {
+    showToast('الملاحظة غير موجودة أو لم تعد متاحة.');
+    return;
+  }
+  openLearningNoteForm(detail, note || null);
+  document.getElementById('learningNoteDialog').classList.add('learning-note-focus');
+  document.getElementById('learningNoteFocusToggle').setAttribute('aria-pressed', 'true');
+  document.getElementById('learningNoteFocusToggle').textContent = 'إنهاء وضع التركيز';
+  document.getElementById('learningNoteBody').focus();
 }
 
 async function pasteBookmarkUrl() {
@@ -2170,6 +2818,7 @@ async function initializeSession() {
   try {
     await loadAccountSettings();
     await refresh();
+    await openRequestedLearningNote();
     await processCaptureLink();
     await processBookClubInvite();
   } catch (error) {
@@ -2188,6 +2837,23 @@ function renderBackupList(backups) {
 
 async function loadAccountSettings() {
   const settings = await api('/api/settings');
+  language = settings.language;
+  applyLanguage(language);
+  document.querySelector('#settingsForm [name="language"]').value = language;
+  document.querySelector('#settingsForm [name="financeCurrency"]').value = settings.financeCurrency || 'EGP';
+  prayerLocation = {
+    latitude: settings.prayerLatitude,
+    longitude: settings.prayerLongitude,
+    label: settings.prayerLocation,
+    method: settings.prayerMethod,
+  };
+  document.querySelector('#settingsForm [name="prayerLatitude"]').value = prayerLocation.latitude ?? '';
+  document.querySelector('#settingsForm [name="prayerLongitude"]').value = prayerLocation.longitude ?? '';
+  document.querySelector('#settingsForm [name="prayerLocation"]').value = prayerLocation.label;
+  document.querySelector('#settingsForm [name="prayerMethod"]').value = String(prayerLocation.method);
+  renderPrayerTimes();
+  loadPrayerTimes();
+  if (!prayerTimesRefreshTimer) prayerTimesRefreshTimer = setInterval(() => loadPrayerTimes(true), 30 * 60 * 1000);
   editMode = settings.editMode;
   document.querySelector('#settingsForm [name="editMode"]').value = editMode;
   const legacyTheme = localStorage.getItem('personal-memo-theme');
@@ -2206,9 +2872,20 @@ async function loadAccountSettings() {
   fontSizeOffset = settings.fontSizeOffset;
   lineSpacing = settings.lineSpacing;
   fontFamily = settings.fontFamily;
+  shortcuts = settings.shortcuts;
   document.querySelector('#settingsForm [name="fontSizeOffset"]').value = String(fontSizeOffset);
   document.querySelector('#settingsForm [name="lineSpacing"]').value = lineSpacing;
   document.querySelector('#settingsForm [name="fontFamily"]').value = fontFamily;
+  for (const [action, name] of Object.entries({
+    todo: 'shortcutTodo',
+    dailyNote: 'shortcutDailyNote',
+    readLater: 'shortcutReadLater',
+    quickCreate: 'shortcutQuickCreate',
+  })) {
+    const select = document.querySelector(`#settingsForm [name="${name}"]`);
+    select.innerHTML = shortcutChoices.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+    select.value = shortcuts[action];
+  }
   applyTypographySettings();
   applyMarkdownSettings();
   reminderMinutes = settings.reminderMinutes;
@@ -2433,7 +3110,7 @@ async function openProgress(id) {
   progressForm.elements.progress.value = item.progress || '';
   const history = await api(`/api/items/${id}/progress`);
   document.getElementById('progressHistory').innerHTML = history.length
-    ? history.map(entry => `<article class="history-entry"><strong>${escapeHtml(entry.progress)}</strong><time>${new Date(entry.logged_at).toLocaleString('ar-EG')}</time>${entry.note ? `<p>${escapeHtml(entry.note)}</p>` : ''}</article>`).join('')
+    ? history.map(entry => `<article class="history-entry"><strong>${escapeHtml(entry.progress)}</strong><time>${new Date(entry.logged_at).toLocaleString(formatLocale())}</time>${entry.note ? `<p>${escapeHtml(entry.note)}</p>` : ''}</article>`).join('')
     : '<p class="item-creator">سيظهر سجل جلساتك هنا بعد أول تحديث.</p>';
   applyAutoDirection(progressDialog);
   progressDialog.showModal();
@@ -2442,8 +3119,190 @@ async function openProgress(id) {
 
 document.getElementById('addArticleButton').addEventListener('click', () => openArticleForm());
 document.getElementById('addBookmarkButton').addEventListener('click', () => openBookmarkForm());
+document.getElementById('addSnippetButton').addEventListener('click', () => openSnippetForm());
+document.getElementById('addLearningTopic').addEventListener('click', () => openLearningTopicForm());
+document.getElementById('learningSearch').addEventListener('input', () => {
+  activeLearningTopic = null;
+  renderLearningHub();
+});
+document.getElementById('learningTopicList').addEventListener('click', event => {
+  const button = event.target.closest('[data-learning-topic]');
+  if (!button) return;
+  activeLearningTopic = { id: Number(button.dataset.learningTopic) };
+  renderLearningHub();
+});
+document.getElementById('learningTopicContent').addEventListener('click', async event => {
+  if (event.target.closest('[data-learning-create-topic]')) return openLearningTopicForm();
+  const editTopic = event.target.closest('[data-learning-edit-topic]');
+  if (editTopic) return openLearningTopicForm(learningTopics.find(topic => topic.id === Number(editTopic.dataset.learningEditTopic)));
+  const addNote = event.target.closest('[data-learning-add-note]');
+  if (addNote && activeLearningTopic) return openLearningNoteForm(activeLearningTopic);
+  const editNote = event.target.closest('[data-learning-edit-note]');
+  if (editNote && activeLearningTopic) {
+    const note = activeLearningTopic.notes.find(entry => entry.id === Number(editNote.dataset.learningEditNote));
+    if (note) openLearningNoteForm(activeLearningTopic, note);
+    return;
+  }
+  const deleteTopic = event.target.closest('[data-learning-delete-topic]');
+  if (deleteTopic && activeLearningTopic && window.confirm(`حذف موضوع "${activeLearningTopic.title}" وكل ملاحظاته وملفاته؟`)) {
+    try {
+      await api(`/api/learning/topics/${activeLearningTopic.id}`, { method: 'DELETE' });
+      activeLearningTopic = null;
+      learningTopics = await api('/api/learning/topics');
+      renderLearningHub();
+      showToast('تم حذف الموضوع ومحتوياته.');
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  const deleteNote = event.target.closest('[data-learning-delete-note]');
+  if (deleteNote && activeLearningTopic) {
+    const note = activeLearningTopic.notes.find(entry => entry.id === Number(deleteNote.dataset.learningDeleteNote));
+    if (!note || !window.confirm(`حذف الملاحظة "${note.title}" وملفاتها؟`)) return;
+    try {
+      await api(`/api/learning/notes/${note.id}`, { method: 'DELETE' });
+      learningTopics = await api('/api/learning/topics');
+      await renderLearningHub();
+      showToast('تم حذف الملاحظة.');
+    } catch (error) {
+      showToast(error.message);
+    }
+    return;
+  }
+  const deleteFile = event.target.closest('[data-learning-delete-file]');
+  if (deleteFile && window.confirm('حذف هذا الملف؟')) {
+    try {
+      await api(`/api/learning/files/${deleteFile.dataset.learningDeleteFile}`, { method: 'DELETE' });
+      learningTopics = await api('/api/learning/topics');
+      await renderLearningHub();
+      showToast('تم حذف الملف.');
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+});
+document.getElementById('learningTopicForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  const id = values.id;
+  delete values.id;
+  try {
+    const topic = await api(id ? `/api/learning/topics/${id}` : '/api/learning/topics', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(values),
+    });
+    activeLearningTopic = { id: topic.id };
+    learningTopics = await api('/api/learning/topics');
+    document.getElementById('learningTopicDialog').close();
+    await renderLearningHub();
+    showToast(id ? 'تم تحديث الموضوع.' : 'تم إنشاء الموضوع.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+document.getElementById('learningNoteForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = new FormData(form);
+  const id = values.get('id');
+  const topicId = values.get('topic_id');
+  const files = [...form.elements.files.files];
+  const noteData = { title: values.get('title'), body: values.get('body') };
+  try {
+    const note = await api(id ? `/api/learning/notes/${id}` : `/api/learning/topics/${topicId}/notes`, {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(noteData),
+    });
+    form.elements.id.value = note.id;
+    const noteUrl = new URL(location.href);
+    if (noteUrl.searchParams.has('learning-note')) {
+      noteUrl.searchParams.set('learning-note', note.id);
+      noteUrl.searchParams.set('topic', topicId);
+      history.replaceState(null, '', noteUrl);
+    }
+    if (files.length) {
+      const attachments = new FormData();
+      files.forEach(file => attachments.append('files', file));
+      try {
+        await api(`/api/learning/notes/${note.id}/files`, { method: 'POST', body: attachments });
+      } catch (error) {
+        learningTopics = await api('/api/learning/topics');
+        activeLearningTopic = { id: Number(topicId) };
+        await renderLearningHub();
+        showToast(`تم حفظ الملاحظة، لكن تعذّر رفع الملفات: ${error.message}`);
+        return;
+      }
+    }
+    learningTopics = await api('/api/learning/topics');
+    activeLearningTopic = { id: Number(topicId) };
+    document.getElementById('learningNoteDialog').close();
+    await renderLearningHub();
+    showToast('تم حفظ الملاحظة والملفات.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+document.querySelectorAll('[data-learning-format]').forEach(button => {
+  button.addEventListener('click', () => insertAtCursor(document.getElementById('learningNoteBody'), button.dataset.learningFormat));
+});
+document.getElementById('learningNotePreviewToggle').addEventListener('click', event => {
+  const body = document.getElementById('learningNoteBody');
+  const preview = document.getElementById('learningNotePreview');
+  const showing = preview.classList.toggle('hidden') === false;
+  body.classList.toggle('hidden', showing);
+  preview.innerHTML = showing ? renderRichText(body.value) : '';
+  event.currentTarget.setAttribute('aria-pressed', String(showing));
+  event.currentTarget.textContent = showing ? 'تحرير' : 'معاينة';
+});
+document.getElementById('learningNoteFocusToggle').addEventListener('click', event => {
+  const dialog = document.getElementById('learningNoteDialog');
+  const focused = dialog.classList.toggle('learning-note-focus');
+  event.currentTarget.setAttribute('aria-pressed', String(focused));
+  event.currentTarget.textContent = focused ? 'إنهاء وضع التركيز' : 'وضع التركيز';
+});
+document.getElementById('learningNoteDialog').addEventListener('close', event => {
+  event.currentTarget.classList.remove('learning-note-focus');
+});
+document.getElementById('learningTopicContent').addEventListener('change', async event => {
+  const input = event.target.closest('[data-learning-upload]');
+  if (!input || !input.files.length) return;
+  const formData = new FormData();
+  [...input.files].forEach(file => formData.append('files', file));
+  input.disabled = true;
+  try {
+    await api(`/api/learning/notes/${input.dataset.learningUpload}/files`, { method: 'POST', body: formData });
+    learningTopics = await api('/api/learning/topics');
+    await renderLearningHub();
+    showToast('تم إرفاق الملفات.');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    input.disabled = false;
+  }
+});
 document.getElementById('pasteBookmarkButton').addEventListener('click', pasteBookmarkUrl);
 document.getElementById('bookmarkSearch').addEventListener('input', renderBookmarks);
+document.getElementById('bookmarkCategories').addEventListener('click', event => {
+  const button = event.target.closest('[data-bookmark-category]');
+  if (!button) return;
+  bookmarkCategoryFilter = button.dataset.bookmarkCategory;
+  renderBookmarks();
+});
+document.getElementById('snippetSearch').addEventListener('input', renderCodeSnippets);
+document.getElementById('snippetLanguageFilters').addEventListener('click', event => {
+  const button = event.target.closest('[data-snippet-language]');
+  if (!button) return;
+  snippetLanguageFilter = button.dataset.snippetLanguage;
+  renderCodeSnippets();
+});
+document.getElementById('articleStatusFilters').addEventListener('click', event => {
+  const button = event.target.closest('[data-article-filter]');
+  if (!button) return;
+  articleFilter = button.dataset.articleFilter;
+  renderArticles();
+});
 document.getElementById('dailyNoteForm').addEventListener('submit', async event => {
   event.preventDefault();
   clearTimeout(dailyNoteSaveTimer);
@@ -2775,7 +3634,149 @@ document.getElementById('markAllNotificationsRead').addEventListener('click', as
     showToast(error.message);
   }
 });
+document.getElementById('prayerTimesToggle').addEventListener('click', event => {
+  const panel = document.getElementById('prayerTimesPanel');
+  const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
+  event.currentTarget.setAttribute('aria-expanded', String(expanded));
+  panel.classList.toggle('hidden', !expanded);
+  if (expanded) loadPrayerTimes();
+});
+document.getElementById('quranPlayerToggle').addEventListener('click', event => {
+  const panel = document.getElementById('quranPlayerPanel');
+  const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
+  event.currentTarget.setAttribute('aria-expanded', String(expanded));
+  panel.classList.toggle('hidden', !expanded);
+  if (expanded && document.getElementById('quranPlayerMode').value === 'surah') loadQuranSurahs();
+});
+document.getElementById('quranPlayerClose').addEventListener('click', () => {
+  document.getElementById('quranPlayerPanel').classList.add('hidden');
+  document.getElementById('quranPlayerToggle').setAttribute('aria-expanded', 'false');
+});
+document.getElementById('quranPlayerMode').addEventListener('change', event => {
+  const audio = document.getElementById('quranAudio');
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  document.getElementById('quranPlayerStatus').textContent = '';
+  const radioMode = event.currentTarget.value === 'radio';
+  document.getElementById('quranSurahControls').classList.toggle('hidden', radioMode);
+  document.getElementById('quranRadioControls').classList.toggle('hidden', !radioMode);
+  if (radioMode) loadQuranRadios();
+  else loadQuranSurahs();
+});
+document.getElementById('quranSurahSelect').addEventListener('change', setQuranSurahAudio);
+document.getElementById('quranReciterSelect').addEventListener('change', setQuranSurahAudio);
+document.getElementById('quranRadioSelect').addEventListener('change', async event => {
+  const audio = document.getElementById('quranAudio');
+  if (!event.currentTarget.value) return;
+  audio.src = event.currentTarget.value;
+  audio.load();
+  try {
+    await audio.play();
+    document.getElementById('quranPlayerStatus').textContent = language === 'en' ? 'Live radio is playing.' : 'يتم تشغيل الإذاعة المباشرة.';
+  } catch (error) {
+    document.getElementById('quranPlayerStatus').textContent = language === 'en'
+      ? `Could not start radio: ${error.message}` : `تعذّر تشغيل الإذاعة: ${error.message}`;
+  }
+});
+document.getElementById('quranAudio').addEventListener('error', () => {
+  document.getElementById('quranPlayerStatus').textContent = language === 'en'
+    ? 'Audio could not be loaded. Choose another station or try again later.'
+    : 'تعذّر تحميل الصوت. اختر إذاعة أخرى أو حاول لاحقاً.';
+});
+document.getElementById('financeMonth').addEventListener('change', loadFinance);
+document.getElementById('addFinanceTransaction').addEventListener('click', () => openFinanceDialog('transaction'));
+document.getElementById('addFinanceSubscription').addEventListener('click', () => openFinanceDialog('subscription'));
+document.getElementById('addFinanceBudget').addEventListener('click', () => openFinanceDialog('budget'));
+document.getElementById('financeForm').addEventListener('submit', submitFinanceForm);
+document.getElementById('financeTransactionList').addEventListener('click', async event => {
+  const edit = event.target.closest('[data-finance-edit-transaction]');
+  const remove = event.target.closest('[data-finance-delete-transaction]');
+  if (edit) {
+    openFinanceDialog('transaction', financeData.transactions.find(item => item.id === Number(edit.dataset.financeEditTransaction)));
+    return;
+  }
+  if (remove && window.confirm(language === 'en' ? 'Delete this transaction?' : 'حذف هذه العملية؟')) {
+    try {
+      await api(`/api/finance/transactions/${remove.dataset.financeDeleteTransaction}`, { method: 'DELETE' });
+      await loadFinance();
+    } catch (error) { showToast(error.message); }
+  }
+});
+document.getElementById('financeSubscriptionList').addEventListener('click', async event => {
+  const edit = event.target.closest('[data-finance-edit-subscription]');
+  const remove = event.target.closest('[data-finance-delete-subscription]');
+  const pay = event.target.closest('[data-finance-pay-subscription]');
+  if (edit) {
+    openFinanceDialog('subscription', financeData.subscriptions.find(item => item.id === Number(edit.dataset.financeEditSubscription)));
+    return;
+  }
+  try {
+    if (pay) {
+      const subscription = financeData.subscriptions.find(item => item.id === Number(pay.dataset.financePaySubscription));
+      if (!subscription) throw new Error(language === 'en' ? 'Subscription not found. Refresh and try again.' : 'الاشتراك غير موجود. حدّث الصفحة وحاول مجدداً.');
+      await api(`/api/finance/subscriptions/${subscription.id}/pay`, {
+        method: 'POST',
+        body: JSON.stringify({ period: subscription.next_renewal_date }),
+      });
+      await loadFinance();
+    } else if (remove && window.confirm(language === 'en' ? 'Delete this subscription?' : 'حذف هذا الاشتراك؟')) {
+      await api(`/api/finance/subscriptions/${remove.dataset.financeDeleteSubscription}`, { method: 'DELETE' });
+      await loadFinance();
+    }
+  } catch (error) { showToast(error.message); }
+});
+document.getElementById('financeBudgetList').addEventListener('click', async event => {
+  const remove = event.target.closest('[data-finance-delete-budget]');
+  if (!remove || !window.confirm(language === 'en' ? 'Delete this budget?' : 'حذف هذه الميزانية؟')) return;
+  try {
+    await api(`/api/finance/budgets/${remove.dataset.financeDeleteBudget}`, { method: 'DELETE' });
+    await loadFinance();
+  } catch (error) { showToast(error.message); }
+});
+document.getElementById('prayerTimesRefresh').addEventListener('click', () => loadPrayerTimes(true));
+document.getElementById('prayerTimesSettings').addEventListener('click', () => {
+  document.getElementById('prayerTimesPanel').classList.add('hidden');
+  document.getElementById('prayerTimesToggle').setAttribute('aria-expanded', 'false');
+  openSettings();
+});
+document.getElementById('useCurrentPrayerLocation').addEventListener('click', event => {
+  const button = event.currentTarget;
+  const status = document.getElementById('prayerLocationStatus');
+  if (!navigator.geolocation) {
+    status.textContent = language === 'en' ? 'Geolocation is not available in this browser.' : 'الموقع الجغرافي غير متاح في هذا المتصفح.';
+    return;
+  }
+  button.disabled = true;
+  status.textContent = language === 'en' ? 'Requesting your location…' : 'جارٍ طلب موقعك…';
+  navigator.geolocation.getCurrentPosition(position => {
+    const form = document.getElementById('settingsForm');
+    form.elements.prayerLatitude.value = position.coords.latitude.toFixed(6);
+    form.elements.prayerLongitude.value = position.coords.longitude.toFixed(6);
+    if (!form.elements.prayerLocation.value.trim()) {
+      form.elements.prayerLocation.value = language === 'en' ? 'Current location' : 'موقعي الحالي';
+    }
+    status.textContent = language === 'en'
+      ? 'Location filled in. Save settings to apply it.'
+      : 'تم إدخال الموقع. احفظ الإعدادات لتطبيقه.';
+    button.disabled = false;
+  }, error => {
+    const reason = error.code === error.PERMISSION_DENIED
+      ? (language === 'en' ? 'Location permission was denied.' : 'لم يُسمح بالوصول إلى الموقع.')
+      : language === 'en' ? 'Could not determine your location.' : 'تعذّر تحديد موقعك.';
+    status.textContent = reason;
+    button.disabled = false;
+  }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000 });
+});
 document.addEventListener('click', event => {
+  if (!event.target.closest('#prayerTimesWidget')) {
+    document.getElementById('prayerTimesPanel').classList.add('hidden');
+    document.getElementById('prayerTimesToggle').setAttribute('aria-expanded', 'false');
+  }
+  if (!event.target.closest('#quranPlayerWidget')) {
+    document.getElementById('quranPlayerPanel').classList.add('hidden');
+    document.getElementById('quranPlayerToggle').setAttribute('aria-expanded', 'false');
+  }
   if (!event.target.closest('.notification-center')) {
     document.getElementById('notificationsPanel').classList.add('hidden');
     document.getElementById('notificationsButton').setAttribute('aria-expanded', 'false');
@@ -2840,6 +3841,18 @@ document.getElementById('settingsForm').addEventListener('submit', async event =
     fontSizeOffset: Number(form.elements.fontSizeOffset.value),
     lineSpacing: form.elements.lineSpacing.value,
     fontFamily: form.elements.fontFamily.value,
+    language: form.elements.language.value,
+    financeCurrency: form.elements.financeCurrency.value,
+    prayerLatitude: form.elements.prayerLatitude.value.trim() === '' ? null : Number(form.elements.prayerLatitude.value),
+    prayerLongitude: form.elements.prayerLongitude.value.trim() === '' ? null : Number(form.elements.prayerLongitude.value),
+    prayerLocation: form.elements.prayerLocation.value.trim(),
+    prayerMethod: Number(form.elements.prayerMethod.value),
+    shortcuts: {
+      todo: form.elements.shortcutTodo.value,
+      dailyNote: form.elements.shortcutDailyNote.value,
+      readLater: form.elements.shortcutReadLater.value,
+      quickCreate: form.elements.shortcutQuickCreate.value,
+    },
   };
   if (settings.notificationsEnabled && (!('Notification' in window) || Notification.permission !== 'granted')) {
     document.getElementById('settingsMessage').textContent = 'فعّل إذن التنبيهات من المتصفح أولاً.';
@@ -2854,6 +3867,18 @@ document.getElementById('settingsForm').addEventListener('submit', async event =
   }
   try {
     await api('/api/settings', { method: 'PUT', body: JSON.stringify(settings) });
+    applyLanguage(settings.language);
+    document.querySelector('#settingsForm [name="language"]').value = settings.language;
+    prayerLocation = {
+      latitude: settings.prayerLatitude,
+      longitude: settings.prayerLongitude,
+      label: settings.prayerLocation,
+      method: settings.prayerMethod,
+    };
+    prayerTimesData = null;
+    prayerTimesLoadedKey = '';
+    renderPrayerTimes();
+    loadPrayerTimes(true);
     editMode = settings.editMode;
     themeMode = settings.themeMode;
     notificationsEnabled = settings.notificationsEnabled;
@@ -2866,6 +3891,7 @@ document.getElementById('settingsForm').addEventListener('submit', async event =
     lineSpacing = settings.lineSpacing;
     fontFamily = settings.fontFamily;
     applyTypographySettings();
+    if (activeWorkspace === 'finance') loadFinance();
     applyMarkdownSettings();
     if (themeMode === 'system') localStorage.removeItem('personal-memo-theme');
     else localStorage.setItem('personal-memo-theme', themeMode);
@@ -3156,7 +4182,9 @@ document.getElementById('authForm').addEventListener('submit', async event => {
     hasRegisteredUsers = true;
     form.reset();
     showAuthentication(result.user);
+    await loadAccountSettings();
     await refresh();
+    await openRequestedLearningNote();
     await processCaptureLink();
   } catch (error) {
     document.getElementById('authError').textContent = error.message;
@@ -3205,13 +4233,33 @@ document.addEventListener('click', event => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (currentUser && !document.querySelector('dialog[open]')
+  const isTyping = event.target.closest('input,textarea,select,[contenteditable="true"]');
+  const configuredShortcut = currentUser && !isTyping && !document.querySelector('dialog[open]')
+    && event.ctrlKey && event.altKey && event.shiftKey && !event.metaKey
+    ? Object.entries(shortcuts).find(([, key]) => key && key === `Ctrl+Alt+Shift+${event.code}`)?.[0]
+    : null;
+  if (configuredShortcut === 'todo') {
+    event.preventDefault();
+    setWorkspaceView('todos', true);
+    document.querySelector('#quickTodoForm [name="title"]').focus();
+  } else if (configuredShortcut === 'dailyNote') {
+    event.preventDefault();
+    setWorkspaceView('daily-notes', true);
+    document.querySelector('#dailyNoteBody').focus();
+  } else if (configuredShortcut === 'readLater') {
+    event.preventDefault();
+    setWorkspaceView('articles', true);
+    openArticleForm();
+  } else if (configuredShortcut === 'quickCreate') {
+    event.preventDefault();
+    document.getElementById('quickCreateDialog').showModal();
+  } else if (currentUser && !document.querySelector('dialog[open]')
     && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();
     document.getElementById('globalSearch').focus();
     document.getElementById('globalSearch').select();
-  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n'
-    && !event.target.closest('input,textarea,select,[contenteditable="true"]')
+  } else if (currentUser && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n'
+    && !isTyping
     && !document.querySelector('dialog[open]')) {
     event.preventDefault();
     document.getElementById('quickCreateDialog').showModal();
@@ -3639,6 +4687,24 @@ document.getElementById('bookmarkForm').addEventListener('submit', async event =
     showToast(error.message);
   }
 });
+document.getElementById('snippetForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  const id = values.id;
+  delete values.id;
+  try {
+    await api(id ? `/api/snippets/${id}` : '/api/snippets', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(values),
+    });
+    document.getElementById('snippetDialog').close();
+    await refreshWorkspace();
+    showToast('تم حفظ المقطع البرمجي.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
 document.getElementById('createClubButton').addEventListener('click', () => {
   document.getElementById('bookClubForm').reset();
   document.getElementById('bookClubDialog').showModal();
@@ -3824,9 +4890,49 @@ document.getElementById('bookClubDetails').addEventListener('submit', async even
     showToast(error.message);
   }
 });
+document.getElementById('snippetsList').addEventListener('click', async event => {
+  const create = event.target.closest('[data-empty-action="snippet"]');
+  if (create) return openSnippetForm();
+  const edit = event.target.closest('[data-snippet-edit]');
+  if (edit) return openSnippetForm(codeSnippets.find(snippet => snippet.id === Number(edit.dataset.snippetEdit)));
+  const copy = event.target.closest('[data-snippet-copy]');
+  if (copy) {
+    const snippet = codeSnippets.find(row => row.id === Number(copy.dataset.snippetCopy));
+    if (!snippet) return;
+    try {
+      await navigator.clipboard.writeText(snippet.code);
+      showToast('تم نسخ المقطع البرمجي.');
+    } catch (error) {
+      showToast(`تعذّر نسخ الكود: ${error.message}`);
+    }
+    return;
+  }
+  const remove = event.target.closest('[data-snippet-delete]');
+  if (!remove) return;
+  const snippet = codeSnippets.find(row => row.id === Number(remove.dataset.snippetDelete));
+  if (!snippet || !window.confirm(`حذف المقطع "${snippet.title}"؟`)) return;
+  try {
+    await api(`/api/snippets/${snippet.id}`, { method: 'DELETE' });
+    await refreshWorkspace();
+    showToast('تم حذف المقطع البرمجي.');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
 document.getElementById('timelineFilter').addEventListener('submit', event => {
   event.preventDefault();
   renderTimeline();
+});
+document.querySelectorAll('[data-timeline-range]').forEach(button => {
+  button.addEventListener('click', () => {
+    const form = document.getElementById('timelineFilter');
+    const end = form.elements.end.value || localToday();
+    const startDate = new Date(`${end}T12:00:00`);
+    startDate.setDate(startDate.getDate() - Number(button.dataset.timelineRange) + 1);
+    form.elements.start.value = localDateValue(startDate);
+    form.elements.end.value = end;
+    renderTimeline();
+  });
 });
 
 document.getElementById('bookmarksList').addEventListener('click', async event => {
@@ -3870,6 +4976,24 @@ document.getElementById('articlesList').addEventListener('click', async event =>
   }
   const edit = event.target.closest('[data-article-edit]');
   if (edit) return openArticleForm(articles.find(article => article.id === Number(edit.dataset.articleEdit)));
+  const status = event.target.closest('[data-article-status]');
+  if (status) {
+    const article = articles.find(row => row.id === Number(status.dataset.articleStatus));
+    if (!article) return;
+    status.disabled = true;
+    try {
+      await api(`/api/articles/${article.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...article, status: status.dataset.nextStatus }),
+      });
+      await refreshWorkspace();
+      showToast('تم تحديث حالة القراءة.');
+    } catch (error) {
+      status.disabled = false;
+      showToast(error.message);
+    }
+    return;
+  }
   const remove = event.target.closest('[data-article-delete]');
   if (!remove) return;
   try {
