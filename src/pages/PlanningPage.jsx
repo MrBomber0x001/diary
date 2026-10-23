@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import CollectionPage from './CollectionPage.jsx';
+import { lazy, useState } from 'react';
 import { collections } from './collections.js';
+
+const CollectionPage = lazy(() => import('./CollectionPage.jsx'));
 
 const sections = [
   ['areas', 'مجالات الحياة'], ['goals', 'الأهداف'], ['projects', 'المشاريع'],

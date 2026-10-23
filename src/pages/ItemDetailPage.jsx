@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import Editor from '../components/Editor.jsx';
 import ActionIcon from '../components/ActionIcon.jsx';
 import MarkdownContent from '../components/MarkdownContent.jsx';
+import WritingDialog from '../components/WritingDialog.jsx';
 import { messages } from '../i18n.js';
 import { navigate } from '../navigation.jsx';
 import { collections } from './collections.js';
@@ -41,6 +42,7 @@ export default function ItemDetailPage({ id, language, onUnauthorized }) {
   useEffect(() => { load(); }, [load]);
 
   async function saveItem(value) {
+    setError('');
     try {
       setItem(await api(`/items/${id}`, { method: 'PUT', body: value }));
       setMode('');
@@ -54,6 +56,7 @@ export default function ItemDetailPage({ id, language, onUnauthorized }) {
     catch (failure) { setError(failure.message); }
   }
   async function addChapter(value) {
+    setError('');
     try {
       const chapter = await api(`/items/${id}/chapters`, { method: 'POST', body: value });
       setChapters(current => [...current, chapter]);
@@ -88,15 +91,10 @@ export default function ItemDetailPage({ id, language, onUnauthorized }) {
         <div><h1>{item.title}</h1><p>{[item.creator, item.kind, item.status].filter(Boolean).join(' · ')}</p></div>
         {item.cover_image && <img className="detail-cover" src={item.cover_image} alt="" />}
       </header>
-      {mode === 'edit' && <section className="item-inline-editor">
-        <header className="collection-inline-heading"><h2>{language === 'ar' ? 'تحرير العنصر' : 'Edit item'}</h2></header>
-        <Editor fields={collections.library.fields} value={item} language={language} onSubmit={saveItem} onCancel={() => setMode('')} onUnauthorized={onUnauthorized} quickCapture />
-      </section>}
       {mode === 'progress' && <Editor fields={progressFields} language={language} onSubmit={addProgress} onCancel={() => setMode('')} onUnauthorized={onUnauthorized} />}
-      {mode === 'chapter' && <Editor fields={chapterFields} language={language} onSubmit={addChapter} onCancel={() => setMode('')} onUnauthorized={onUnauthorized} />}
       <div className="record-actions">
         <button className="button button-primary" onClick={() => setMode('progress')}>＋ تحديث التقدم</button>
-        <ActionIcon action="edit" label={`${t.edit}: ${item.title}`} onClick={() => setMode('edit')} />
+        <button className="button button-quiet" type="button" onClick={() => setMode('edit')}>{language === 'ar' ? 'اكتب ملاحظاتك' : 'Write notes'}</button>
         {item.kind === 'book' && <button className="button button-quiet" onClick={() => setMode('chapter')}>＋ فصل</button>}
       </div>
       {item.review && renderMarkdownSection('review', 'مراجعة', item.review)}
@@ -106,6 +104,11 @@ export default function ItemDetailPage({ id, language, onUnauthorized }) {
           {chapter.notes && <MarkdownContent>{chapter.notes}</MarkdownContent>}</article>
       )) : <p>{t.empty}</p>}</section>}
       <section><h2>سجل التقدم</h2>{history.length ? history.map(entry => <p key={entry.id}>{entry.logged_at} · {entry.progress} {entry.note && `— ${entry.note}`}</p>) : <p>{t.empty}</p>}</section>
+      {mode === 'edit' && <WritingDialog title={item.title} fields={collections.library.fields} value={item} bodyKey="notes"
+        language={language} onSubmit={saveItem} onCancel={() => setMode('')} onUnauthorized={onUnauthorized} error={error} />}
+      {mode === 'chapter' && <WritingDialog title={language === 'ar' ? `فصل جديد · ${item.title}` : `New chapter · ${item.title}`}
+        fields={chapterFields} value={{}} bodyKey="notes" language={language}
+        onSubmit={addChapter} onCancel={() => setMode('')} onUnauthorized={onUnauthorized} error={error} />}
     </section>
   );
 }

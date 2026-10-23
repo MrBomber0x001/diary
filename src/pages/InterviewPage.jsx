@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { messages } from '../i18n.js';
 import { useLocation } from '../navigation.jsx';
 import Editor from '../components/Editor.jsx';
 import ActionIcon from '../components/ActionIcon.jsx';
 import AIInterviewer from '../components/AIInterviewer.jsx';
-import CollectionPage from './CollectionPage.jsx';
 import { collections } from './collections.js';
 import { parseQuestionImport } from '../question-import.mjs';
+
+const CollectionPage = lazy(() => import('./CollectionPage.jsx'));
 
 const topicFields = [{ key: 'title', label: 'موضوع التدريب', required: true }];
 const cardFields = [

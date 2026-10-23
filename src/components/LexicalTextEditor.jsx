@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { $createParagraphNode, $createTextNode, $getRoot, $getSelection, FORMAT_TEXT_COMMAND } from 'lexical';
+import { $createParagraphNode, $createTextNode, $getRoot, $getSelection, $isRangeSelection, COMMAND_PRIORITY_EDITOR, FORMAT_TEXT_COMMAND, INSERT_TAB_COMMAND, KEY_TAB_COMMAND } from 'lexical';
 import { LinkNode } from '@lexical/link';
-import { ListItemNode, ListNode } from '@lexical/list';
+import { $isListItemNode, ListItemNode, ListNode } from '@lexical/list';
 import { $convertFromMarkdownString, $convertToMarkdownString, TRANSFORMERS } from '@lexical/markdown';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
@@ -28,7 +28,7 @@ function setEditorValue(value, markdown) {
 }
 
 function editorText(editorState, markdown) {
-  if (markdown) return $convertToMarkdownString(TRANSFORMERS, editorState);
+  if (markdown) return editorState.read(() => $convertToMarkdownString(TRANSFORMERS));
   return editorState.read(() => $getRoot().getChildren().map(node => node.getTextContent()).join('\n'));
 }
 
@@ -45,6 +45,32 @@ function ValueSyncPlugin({ value, markdown, onChange }) {
     lastValue.current = nextValue;
     onChange(nextValue);
   }} ignoreSelectionChange />;
+}
+
+function $changeListItemIndent(delta) {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection)) return false;
+
+  let node = selection.anchor.getNode();
+  while (node && !$isListItemNode(node)) node = node.getParent();
+  if (!$isListItemNode(node)) return false;
+
+  if (delta > 0 && !$isListItemNode(node.getPreviousSibling())) return true;
+  node.setIndent(Math.max(0, Math.min(6, node.getIndent() + delta)));
+  return true;
+}
+
+function ListTabIndentationPlugin() {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => editor.registerCommand(KEY_TAB_COMMAND, event => {
+    const selection = $getSelection();
+    if (!$isRangeSelection(selection)) return false;
+
+    event.preventDefault();
+    if ($changeListItemIndent(event.shiftKey ? -1 : 1)) return true;
+    return editor.dispatchCommand(INSERT_TAB_COMMAND);
+  }, COMMAND_PRIORITY_EDITOR), [editor]);
+  return null;
 }
 
 function ImageDropPlugin({ onImageUpload, onError }) {
@@ -92,6 +118,10 @@ function ToolbarPlugin({ language, onImageUpload, onError, onChangePreview }) {
     });
   }
 
+  function changeListIndent(delta) {
+    editor.update(() => $changeListItemIndent(delta));
+  }
+
   async function upload(file) {
     if (!file || !onImageUpload) return;
     setUploading(true);
@@ -115,6 +145,12 @@ function ToolbarPlugin({ language, onImageUpload, onError, onChangePreview }) {
     <button type="button" title="Italic" onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')}><em>I</em></button>
     <button type="button" title="Quote" onClick={() => insertMarkdown('> ')}>❞</button>
     <button type="button" title="Bullet list" onClick={() => insertMarkdown('- ')}>•</button>
+    <button type="button" title={isArabic ? 'زيادة إزاحة عنصر القائمة' : 'Indent list item'}
+      aria-label={isArabic ? 'زيادة إزاحة عنصر القائمة' : 'Indent list item'}
+      onMouseDown={event => event.preventDefault()} onClick={() => changeListIndent(1)}>⇥</button>
+    <button type="button" title={isArabic ? 'تقليل إزاحة عنصر القائمة' : 'Outdent list item'}
+      aria-label={isArabic ? 'تقليل إزاحة عنصر القائمة' : 'Outdent list item'}
+      onMouseDown={event => event.preventDefault()} onClick={() => changeListIndent(-1)}>⇤</button>
     <button type="button" title="Link" onClick={() => insertMarkdown('[', '](https://)')}>↗</button>
     <button type="button" title="Image" onClick={() => insertMarkdown('![', '](https://image-url)')}>▧</button>
     <button type="button" title={isArabic ? 'رفع صورة' : 'Upload image'} disabled={uploading || !onImageUpload} onClick={() => fileInput.current?.click()}>
@@ -164,6 +200,7 @@ export default function LexicalTextEditor({ id, value, onChange, language, code 
         placeholder={<div className="lexical-placeholder">{placeholder}</div>}
         ErrorBoundary={LexicalErrorBoundary}
       />
+      {markdown && <ListTabIndentationPlugin />}
       <HistoryPlugin />
       {markdown && <><ListPlugin /><LinkPlugin /><MarkdownShortcutPlugin transformers={TRANSFORMERS} /></>}
       <ValueSyncPlugin value={value} markdown={markdown} onChange={onChange} />

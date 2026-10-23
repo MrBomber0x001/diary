@@ -17,7 +17,7 @@ function createManagementRouter({
     const entry = db.prepare('SELECT * FROM undo_trash WHERE token=? AND user_id=? AND expires_at>?')
       .get(req.params.token, req.user.id, now());
     if (!entry) return res.status(404).json({ error: 'انتهت مهلة التراجع أو أن العنصر غير موجود.' });
-    const tableByType = { item: 'items', todo: 'todos', article: 'saved_articles', bookmark: 'bookmarks' };
+    const tableByType = { item: 'items', todo: 'todos', article: 'saved_articles', bookmark: 'bookmarks', memory: 'memories' };
     const table = tableByType[entry.record_type];
     if (!table) return res.status(400).json({ error: 'نوع العنصر غير صالح للاستعادة.' });
     const restore = db.transaction(() => {

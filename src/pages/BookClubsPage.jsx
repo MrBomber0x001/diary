@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import Editor from '../components/Editor.jsx';
 import { messages } from '../i18n.js';
 import { navigate } from '../navigation.jsx';
-import CollectionPage from './CollectionPage.jsx';
 import { collections } from './collections.js';
+
+const CollectionPage = lazy(() => import('./CollectionPage.jsx'));
 
 const bookFields = [
   { key: 'itemId', label: 'رقم الكتاب في مكتبتك', type: 'number', required: true },

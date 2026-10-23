@@ -81,6 +81,18 @@ export const collections = {
     ],
     show: ['url', 'status', 'description', 'excerpt', 'review'],
   },
+  memories: {
+    title: 'الذكريات', endpoint: '/memories', singular: 'ذكرى', viewType: 'memories',
+    fields: [
+      text('title', 'عنوان الذكرى', { required: true }),
+      text('body', 'اكتب ما تريد تذكّره…', { type: 'textarea', wide: true }),
+      date('memory_date', 'تاريخ الذكرى'),
+      text('place', 'المكان'),
+      text('people', 'الأشخاص'),
+      text('tags', 'وسوم'),
+    ],
+    show: ['memory_date', 'place', 'people', 'tags', 'body'],
+  },
   bookmarks: {
     title: 'الروابط المحفوظة', endpoint: '/bookmarks', singular: 'رابط',
     fields: [

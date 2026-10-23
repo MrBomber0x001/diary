@@ -154,6 +154,53 @@ function createNotesRouter({
     res.json({ ok: true });
   });
 
+  router.get('/memories', (req, res) => {
+    res.json(db.prepare(`SELECT id,title,memory_date,place,people,tags,body,created_at,updated_at FROM memories
+      WHERE user_id=? AND deleted_at IS NULL ORDER BY memory_date DESC,id DESC`).all(req.user.id));
+  });
+
+  router.post('/memories', (req, res) => {
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    const memoryDate = text(req.body?.memory_date || localToday());
+    const place = typeof req.body?.place === 'string' ? req.body.place.trim() : '';
+    const people = typeof req.body?.people === 'string' ? req.body.people.trim() : '';
+    const tags = typeof req.body?.tags === 'string' ? req.body.tags.trim() : '';
+    const body = typeof req.body?.body === 'string' ? req.body.body : '';
+    if (!title || title.length > 200 || !validDate(memoryDate) || place.length > 200
+      || people.length > 500 || tags.length > 500 || body.length > 50000) {
+      return res.status(400).json({ error: 'أدخل عنواناً صالحاً وتحقق من التاريخ والتفاصيل.' });
+    }
+    const timestamp = now();
+    const result = db.prepare(`INSERT INTO memories(user_id,title,memory_date,place,people,tags,body,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(req.user.id, title, memoryDate, place, people, tags, body, timestamp, timestamp);
+    res.status(201).json(db.prepare(`SELECT id,title,memory_date,place,people,tags,body,created_at,updated_at
+      FROM memories WHERE id=? AND user_id=?`).get(result.lastInsertRowid, req.user.id));
+  });
+
+  router.put('/memories/:id', (req, res) => {
+    const existing = db.prepare('SELECT id FROM memories WHERE id=? AND user_id=? AND deleted_at IS NULL')
+      .get(req.params.id, req.user.id);
+    if (!existing) return res.status(404).json({ error: 'الذكرى غير موجودة.' });
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    const memoryDate = text(req.body?.memory_date);
+    const place = typeof req.body?.place === 'string' ? req.body.place.trim() : '';
+    const people = typeof req.body?.people === 'string' ? req.body.people.trim() : '';
+    const tags = typeof req.body?.tags === 'string' ? req.body.tags.trim() : '';
+    const body = typeof req.body?.body === 'string' ? req.body.body : '';
+    if (!title || title.length > 200 || !validDate(memoryDate) || place.length > 200
+      || people.length > 500 || tags.length > 500 || body.length > 50000) {
+      return res.status(400).json({ error: 'أدخل عنواناً صالحاً وتحقق من التاريخ والتفاصيل.' });
+    }
+    db.prepare(`UPDATE memories SET title=?,memory_date=?,place=?,people=?,tags=?,body=?,updated_at=?
+      WHERE id=? AND user_id=?`).run(title, memoryDate, place, people, tags, body, now(), existing.id, req.user.id);
+    res.json(db.prepare(`SELECT id,title,memory_date,place,people,tags,body,created_at,updated_at
+      FROM memories WHERE id=? AND user_id=?`).get(existing.id, req.user.id));
+  });
+
+  router.delete('/memories/:id', (req, res) => {
+    createUndoableDelete('memory', 'memories', req.params.id, req.user.id, res);
+  });
+
   router.get('/daily-notes', (req, res) => {
     const date = text(req.query.date || localToday());
     if (!validDate(date)) return res.status(400).json({ error: 'اختر تاريخاً صحيحاً للمذكرة.' });

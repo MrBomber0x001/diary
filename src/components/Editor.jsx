@@ -25,7 +25,7 @@ export function convertFields(fields, values) {
   }, {});
 }
 
-export default function Editor({ fields, value, language, onSubmit, onCancel, onUnauthorized, submitLabel, showCancel = true, quickCapture = false }) {
+export default function Editor({ fields, value, language, onSubmit, onCancel, onUnauthorized, submitLabel, showCancel = true, quickCapture = false, writingMode = false, bodyKey = 'notes' }) {
   const [values, setValues] = useState(() => Object.fromEntries(fields.map(field => [field.key, initialValue(field, value)])));
   const [imageErrors, setImageErrors] = useState({});
   const [showMoreFields, setShowMoreFields] = useState(false);
@@ -68,7 +68,7 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
     const common = {
       id: `field-${field.key}`,
       name: field.key,
-      autoFocus: quickCapture && field.key === 'title',
+      autoFocus: (quickCapture && field.key === 'title') || (writingMode && field.key === bodyKey),
       required: field.required,
       min: field.min,
       max: field.max,
@@ -89,7 +89,7 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
             placeholder={field.label}
             onImageUpload={markdown ? file => uploadImage(field, file) : undefined}
             onImageError={message => setImageErrors(current => ({ ...current, [field.key]: message }))}
-            autoFocus={quickCapture && field.key === 'title'} />
+            autoFocus={common.autoFocus} />
         </Suspense>
         {imageErrors[field.key] && <span className="image-upload-error" role="alert">{imageErrors[field.key]}</span>}
         {!imageErrors[field.key] && field.key !== 'code' && <span className="markdown-hint">{language === 'ar' ? 'يمكنك إسقاط صورة هنا أو رفعها من شريط الأدوات.' : 'Drop an image here or upload it from the toolbar.'}</span>}
@@ -106,23 +106,39 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
     </label>;
   }
 
+  const writingMainKeys = ['title', bodyKey];
+  const writingFields = writingMode
+    ? fields.filter(field => writingMainKeys.includes(field.key)).sort((first, second) => first.key === 'title' ? -1 : second.key === 'title' ? 1 : 0)
+    : [];
+  const writingExtraFields = writingMode ? fields.filter(field => !writingMainKeys.includes(field.key)) : [];
   const quickFieldKeys = ['title', 'kind', 'creator', 'status', 'review', 'notes'];
   const primaryFields = quickCapture
     ? fields.filter(field => quickFieldKeys.includes(field.key)).sort((first, second) => first.key === 'title' ? -1 : second.key === 'title' ? 1 : 0)
     : fields;
   const extraFields = quickCapture ? fields.filter(field => !quickFieldKeys.includes(field.key)) : [];
   return (
-    <form className={`editor${quickCapture ? ' editor-quick-capture' : ''}`} onSubmit={event => { event.preventDefault(); onSubmit(convertFields(fields, values)); }}
-      onKeyDown={event => { if (quickCapture && (event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); event.currentTarget.requestSubmit(); } }}>
-      {primaryFields.map(renderField)}
-      {extraFields.length > 0 && <>
+    <form className={`editor${quickCapture ? ' editor-quick-capture' : ''}${writingMode ? ' writing-editor' : ''}`} onSubmit={event => { event.preventDefault(); onSubmit(convertFields(fields, values)); }}
+      onKeyDown={event => { if ((quickCapture || writingMode) && (event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); event.currentTarget.requestSubmit(); } }}>
+      {writingMode ? writingFields.map(field => field.key === 'title'
+        ? <label className="writing-title-field wide" htmlFor={`field-${field.key}`} key={field.key}><span className="sr-only">{field.label}</span>{fieldInput(field)}</label>
+        : <label className="writing-body-field wide" htmlFor={`field-${field.key}`} key={field.key}><span className="sr-only">{field.label}</span>{fieldInput(field)}</label>)
+        : primaryFields.map(renderField)}
+      {writingMode && writingExtraFields.length > 0 && <>
+        <button className="editor-more-toggle writing-details-toggle" type="button" aria-expanded={showMoreFields} onClick={() => setShowMoreFields(current => !current)}>
+          <span aria-hidden="true">{showMoreFields ? '−' : '+'}</span>{showMoreFields
+            ? (language === 'ar' ? 'إخفاء تفاصيل الملاحظة' : 'Hide note details')
+            : (language === 'ar' ? 'تفاصيل اختيارية' : 'Optional details')}
+        </button>
+        {showMoreFields && <div className="editor-extra-fields writing-extra-fields">{writingExtraFields.map(renderField)}</div>}
+      </>}
+      {!writingMode && extraFields.length > 0 && <>
         <button className="editor-more-toggle" type="button" aria-expanded={showMoreFields} onClick={() => setShowMoreFields(current => !current)}>
           <span aria-hidden="true">{showMoreFields ? '−' : '+'}</span>{showMoreFields ? (language === 'ar' ? 'إخفاء التفاصيل' : 'Hide details') : (language === 'ar' ? 'تفاصيل إضافية' : 'More details')}
         </button>
         {showMoreFields && <div className="editor-extra-fields">{extraFields.map(renderField)}</div>}
       </>}
-      <div className="editor-actions">
-        <button className="button button-primary" type="submit">{submitLabel || t.submit}{quickCapture && <span className="editor-shortcut">Ctrl ↵</span>}</button>
+      <div className={`editor-actions${writingMode ? ' writing-editor-actions' : ''}`}>
+        <button className="button button-primary" type="submit">{submitLabel || t.submit}{(quickCapture || writingMode) && <span className="editor-shortcut">Ctrl ↵</span>}</button>
         {showCancel && <button className="button button-quiet" type="button" onClick={onCancel}>{t.cancel}</button>}
       </div>
     </form>

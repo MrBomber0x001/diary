@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api.js';
 import { currentLocation, Link, navigate, useLocation } from './navigation.jsx';
 import { messages } from './i18n.js';
@@ -6,7 +6,6 @@ import AuthScreen from './components/AuthScreen.jsx';
 import AppShell from './components/AppShell.jsx';
 import { AppDialogProvider } from './components/AppDialogProvider.jsx';
 import { FocusSessionProvider } from './components/FocusSessionContext.jsx';
-import CollectionPage from './pages/CollectionPage.jsx';
 import CalendarPage from './pages/CalendarPage.jsx';
 import TodayPage from './pages/TodayPage.jsx';
 import ItemDetailPage from './pages/ItemDetailPage.jsx';
@@ -23,6 +22,8 @@ import BookClubsPage from './pages/BookClubsPage.jsx';
 import TimelinePage from './pages/TimelinePage.jsx';
 import WellnessPage from './pages/WellnessPage.jsx';
 import { collections } from './pages/collections.js';
+
+const CollectionPage = lazy(() => import('./pages/CollectionPage.jsx'));
 
 function resolveRoute(location) {
   const url = new URL(location, window.location.origin);
@@ -118,6 +119,7 @@ export default function App() {
   else if (route.page === 'habits') content = <><CollectionPage config={collections.habits} language={language} onUnauthorized={unauthorized} /><CollectionPage config={collections.routines} language={language} onUnauthorized={unauthorized} /></>;
   else if (route.page === 'planning') content = <PlanningPage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'notes') content = <NotesPage section="articles" language={language} onUnauthorized={unauthorized} />;
+  else if (route.page === 'memories') content = <NotesPage section="memories" language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'bookmarks') content = <NotesPage section="bookmarks" language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'snippets') content = <NotesPage section="snippets" language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'daily-note') content = <NotesPage section="daily" date={route.date} language={language} onUnauthorized={unauthorized} />;
@@ -139,10 +141,13 @@ export default function App() {
       <FocusSessionProvider userId={user.id} onUnauthorized={unauthorized}>
         <AppShell user={user} page={route.page} language={language} themeMode={themeMode} themeError={themeError} audioItem={audioItem}
           onAudioStop={() => setAudioItem(null)} onThemeToggle={toggleTheme} setLanguage={changeLanguage} onLogout={logout} onUnauthorized={unauthorized}>
-          {content}
-          {['notes', 'bookmarks', 'snippets', 'daily-note'].includes(route.page) && <section className="page-card">
+          <Suspense fallback={<section className="page-card"><p>{messages[language].loading}</p></section>}>
+            {content}
+          </Suspense>
+          {['notes', 'memories', 'bookmarks', 'snippets', 'daily-note'].includes(route.page) && <section className="page-card">
             <div className="record-actions">
               <Link className="button button-quiet" to="/?view=notes">المقالات</Link>
+              <Link className="button button-quiet" to="/?view=memories">الذكريات</Link>
               <Link className="button button-quiet" to="/?view=bookmarks">الروابط المحفوظة</Link>
               <Link className="button button-quiet" to="/?view=daily-note">المذكرة اليومية</Link>
               <Link className="button button-quiet" to="/?view=snippets">المقاطع البرمجية</Link>

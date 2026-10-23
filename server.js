@@ -258,6 +258,20 @@ db.exec(`
     UNIQUE(user_id,note_date)
   );
   CREATE INDEX IF NOT EXISTS idx_daily_notes_user_date ON daily_notes(user_id,note_date DESC);
+  CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    memory_date TEXT NOT NULL,
+    place TEXT NOT NULL DEFAULT '',
+    people TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    deleted_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_memories_user_date ON memories(user_id,deleted_at,memory_date DESC,id DESC);
   CREATE TABLE IF NOT EXISTS learning_topics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -431,6 +445,7 @@ for (const [table, column, definition] of [
   ['todos', 'recurrence', "TEXT NOT NULL DEFAULT 'none' CHECK (recurrence IN ('none','daily','weekly','monthly'))"],
   ['todos', 'deleted_at', 'TEXT'],
   ['todos', 'source_todo_id', 'INTEGER REFERENCES todos(id)'],
+  ['todos', 'parent_todo_id', 'INTEGER REFERENCES todos(id) ON DELETE CASCADE'],
   ['saved_articles', 'deleted_at', 'TEXT'],
   ['bookmarks', 'image_url', "TEXT NOT NULL DEFAULT ''"],
   ['bookmarks', 'category', "TEXT NOT NULL DEFAULT 'عام'"],
@@ -449,6 +464,7 @@ if (db.prepare('PRAGMA table_info("book_club_members")').all().some(column => co
 db.exec('CREATE TABLE IF NOT EXISTS undo_trash(token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, record_type TEXT NOT NULL, record_id INTEGER NOT NULL, record_json TEXT NOT NULL, expires_at TEXT NOT NULL)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_undo_trash_user_expiry ON undo_trash(user_id,expires_at)');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_todos_source_once ON todos(source_todo_id) WHERE source_todo_id IS NOT NULL');
+db.exec('CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(user_id,parent_todo_id,deleted_at,completed,id)');
 db.exec(`
   CREATE TABLE IF NOT EXISTS life_areas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1176,6 +1192,7 @@ const restoreTables = [
   'finance_budgets',
   'todos',
   'saved_articles',
+  'memories',
   'calendar_events',
   'habits',
   'habit_logs',
@@ -1248,7 +1265,7 @@ function restoreDatabaseFrom(filePath, sourceTables) {
         'progress_events', 'chapters', 'audio_attachments', 'image_attachments',
         'habit_logs', 'routine_logs', 'focus_sessions', 'finance_ai_reports', 'ai_interview_turns', 'ai_interview_sessions', 'user_ai_connections',
         'interview_practice_responses', 'interview_practice_sessions',
-        'interview_cards', 'interview_rounds', 'interview_topics', 'interview_applications', 'todos', 'calendar_events', 'saved_articles', 'routines', 'habits',
+        'interview_cards', 'interview_rounds', 'interview_topics', 'interview_applications', 'todos', 'calendar_events', 'saved_articles', 'memories', 'routines', 'habits',
         'book_club_message_attachments', 'book_club_message_links', 'book_club_notifications',
         'book_club_meetings', 'book_club_messages', 'book_club_progress', 'book_club_books',
         'book_club_invites', 'book_club_members', 'book_clubs', 'items', 'projects', 'goals', 'life_areas',
@@ -1740,6 +1757,32 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_wellness_templates_user ON wellness_workout_templates(user_id,name);
+  CREATE TABLE IF NOT EXISTS wellness_catalog_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('food','exercise')),
+    catalog_key TEXT,
+    name TEXT NOT NULL,
+    name_ar TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL,
+    serving TEXT NOT NULL DEFAULT '',
+    serving_ar TEXT NOT NULL DEFAULT '',
+    calories INTEGER NOT NULL DEFAULT 0 CHECK (calories BETWEEN 0 AND 20000),
+    protein_g REAL NOT NULL DEFAULT 0 CHECK (protein_g BETWEEN 0 AND 1000),
+    carbs_g REAL NOT NULL DEFAULT 0 CHECK (carbs_g BETWEEN 0 AND 2000),
+    fat_g REAL NOT NULL DEFAULT 0 CHECK (fat_g BETWEEN 0 AND 1000),
+    sets INTEGER NOT NULL DEFAULT 0 CHECK (sets BETWEEN 0 AND 100),
+    reps INTEGER NOT NULL DEFAULT 0 CHECK (reps BETWEEN 0 AND 1000),
+    duration_minutes INTEGER NOT NULL DEFAULT 0 CHECK (duration_minutes BETWEEN 0 AND 1440),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id,kind,catalog_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_wellness_catalog_user_kind ON wellness_catalog_items(user_id,kind,category,name COLLATE NOCASE);
+  CREATE TABLE IF NOT EXISTS wellness_catalog_setup (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    initialized_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS dashboard_preferences (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     widgets_json TEXT NOT NULL DEFAULT '["summary","focus","progress","tasks","events","habits","wellness"]',

@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import { lazy, useEffect, useState } from 'react';
 import { api, todayDate } from '../api.js';
 import { messages } from '../i18n.js';
-import CollectionPage from './CollectionPage.jsx';
 import Editor from '../components/Editor.jsx';
 import { collections } from './collections.js';
 
+const CollectionPage = lazy(() => import('./CollectionPage.jsx'));
+
 export default function NotesPage({ language, onUnauthorized, section, date }) {
-  if (section !== 'daily') return <CollectionPage config={collections[section === 'bookmarks' ? 'bookmarks' : section === 'snippets' ? 'snippets' : 'articles']} language={language} onUnauthorized={onUnauthorized} />;
+  if (section !== 'daily') return <CollectionPage config={collections[collections[section] ? section : 'articles']} language={language} onUnauthorized={onUnauthorized} />;
   return <DailyNotePage initialDate={date} language={language} onUnauthorized={onUnauthorized} />;
 }
 
@@ -30,7 +31,7 @@ function DailyNotePage({ initialDate, language, onUnauthorized }) {
     } catch (failure) { if (failure.status === 401) onUnauthorized(); else setError(failure.message); }
   }
   return (
-    <section className="page-card">
+    <section className="page-card daily-note-page">
       <header className="page-heading"><div><h1>{language === 'ar' ? 'المذكرة اليومية' : 'Daily note'}</h1><p>{saved}</p></div>
         <label>{language === 'ar' ? 'التاريخ' : 'Date'}<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label>
       </header>
@@ -38,7 +39,7 @@ function DailyNotePage({ initialDate, language, onUnauthorized }) {
       <Editor fields={[
         { key: 'title', label: language === 'ar' ? 'العنوان' : 'Title', wide: true },
         { key: 'body', label: language === 'ar' ? 'مذكرتك' : 'Your note', type: 'textarea', wide: true },
-      ]} value={note} language={language} onSubmit={submitNote} onUnauthorized={onUnauthorized} submitLabel={t.save} showCancel={false} />
+      ]} value={note} language={language} onSubmit={submitNote} onUnauthorized={onUnauthorized} submitLabel={t.save} showCancel={false} writingMode bodyKey="body" />
     </section>
   );
 }

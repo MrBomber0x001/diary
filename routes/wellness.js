@@ -1,4 +1,5 @@
 const express = require('express');
+const { foods: defaultFoods, exercises: defaultExercises } = require('../src/wellnessCatalog.json');
 
 function createWellnessRouter({ db, text, now, localToday }) {
   const router = express.Router();
@@ -68,6 +69,134 @@ function createWellnessRouter({ db, text, now, localToday }) {
     }
     return { workout };
   }
+
+  function validCatalogItem(body, kind) {
+    if (!['food', 'exercise'].includes(kind)) return { error: 'Choose a valid library type.' };
+    const item = {
+      kind,
+      name: text(body?.name),
+      name_ar: text(body?.nameAr),
+      category: text(body?.category),
+      serving: text(body?.serving),
+      serving_ar: text(body?.servingAr),
+    };
+    if (!item.name || item.name.length > 120 || item.name_ar.length > 120
+      || !item.category || item.category.length > 60) return { error: 'Enter a name and category within the allowed lengths.' };
+    if (kind === 'food') {
+      item.calories = nonNegativeNumber(body?.calories, 20000, true);
+      item.protein_g = nonNegativeNumber(body?.protein, 1000);
+      item.carbs_g = nonNegativeNumber(body?.carbs, 2000);
+      item.fat_g = nonNegativeNumber(body?.fat, 1000);
+      if (!item.serving || item.serving.length > 120 || item.serving_ar.length > 120
+        || item.calories === null || item.protein_g === null || item.carbs_g === null || item.fat_g === null) {
+        return { error: 'Enter a valid serving and nutrition values.' };
+      }
+      item.sets = 0;
+      item.reps = 0;
+      item.duration_minutes = 0;
+    } else {
+      item.calories = 0;
+      item.protein_g = 0;
+      item.carbs_g = 0;
+      item.fat_g = 0;
+      item.serving = '';
+      item.serving_ar = '';
+      item.sets = nonNegativeNumber(body?.sets, 100, true);
+      item.reps = nonNegativeNumber(body?.reps, 1000, true);
+      item.duration_minutes = nonNegativeNumber(body?.duration_minutes, 1440, true);
+      if (item.sets === null || item.reps === null || item.duration_minutes === null
+        || (!item.sets && !item.reps && !item.duration_minutes)) return { error: 'Enter valid exercise set, rep, or duration defaults.' };
+    }
+    return { item };
+  }
+
+  function catalogItem(row) {
+    return {
+      id: row.id,
+      kind: row.kind,
+      name: row.name,
+      nameAr: row.name_ar,
+      category: row.category,
+      serving: row.serving,
+      servingAr: row.serving_ar,
+      calories: row.calories,
+      protein: row.protein_g,
+      carbs: row.carbs_g,
+      fat: row.fat_g,
+      sets: row.sets,
+      reps: row.reps,
+      duration_minutes: row.duration_minutes,
+      isBuiltin: row.catalog_key !== null,
+    };
+  }
+
+  function ensureCatalog(userId) {
+    const setup = db.prepare('SELECT user_id FROM wellness_catalog_setup WHERE user_id=?').get(userId);
+    if (setup) return;
+    const timestamp = now();
+    const initialize = db.transaction(() => {
+      const result = db.prepare('INSERT OR IGNORE INTO wellness_catalog_setup(user_id,initialized_at) VALUES (?,?)')
+        .run(userId, timestamp);
+      if (!result.changes) return;
+      const insert = db.prepare(`INSERT OR IGNORE INTO wellness_catalog_items(
+        user_id,kind,catalog_key,name,name_ar,category,serving,serving_ar,calories,protein_g,carbs_g,fat_g,sets,reps,duration_minutes,created_at,updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const food of defaultFoods) {
+        insert.run(userId, 'food', food.id, food.name, food.nameAr, food.category, food.serving, food.servingAr,
+          food.calories, food.protein, food.carbs, food.fat, 0, 0, 0, timestamp, timestamp);
+      }
+      for (const exercise of defaultExercises) {
+        insert.run(userId, 'exercise', exercise.id, exercise.name, exercise.nameAr, exercise.category, '', '',
+          0, 0, 0, 0, exercise.sets, exercise.reps, exercise.duration_minutes || 0, timestamp, timestamp);
+      }
+    });
+    initialize();
+  }
+
+  router.get('/wellness/catalog', (req, res) => {
+    ensureCatalog(req.user.id);
+    const items = db.prepare(`SELECT id,kind,catalog_key,name,name_ar,category,serving,serving_ar,calories,
+      protein_g,carbs_g,fat_g,sets,reps,duration_minutes FROM wellness_catalog_items
+      WHERE user_id=? ORDER BY kind,category COLLATE NOCASE,name COLLATE NOCASE,id`).all(req.user.id).map(catalogItem);
+    res.json({ foods: items.filter(item => item.kind === 'food'), exercises: items.filter(item => item.kind === 'exercise') });
+  });
+
+  router.post('/wellness/catalog', (req, res) => {
+    const kind = text(req.body?.kind);
+    const { item, error } = validCatalogItem(req.body, kind);
+    if (error) return res.status(400).json({ error });
+    const timestamp = now();
+    const result = db.prepare(`INSERT INTO wellness_catalog_items(
+      user_id,kind,name,name_ar,category,serving,serving_ar,calories,protein_g,carbs_g,fat_g,sets,reps,duration_minutes,created_at,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id, item.kind, item.name, item.name_ar, item.category,
+      item.serving, item.serving_ar, item.calories, item.protein_g, item.carbs_g, item.fat_g, item.sets, item.reps,
+      item.duration_minutes, timestamp, timestamp);
+    const row = db.prepare(`SELECT id,kind,catalog_key,name,name_ar,category,serving,serving_ar,calories,
+      protein_g,carbs_g,fat_g,sets,reps,duration_minutes FROM wellness_catalog_items WHERE id=? AND user_id=?`)
+      .get(result.lastInsertRowid, req.user.id);
+    res.status(201).json(catalogItem(row));
+  });
+
+  router.put('/wellness/catalog/:id', (req, res) => {
+    const existing = db.prepare('SELECT id,kind FROM wellness_catalog_items WHERE id=? AND user_id=?')
+      .get(req.params.id, req.user.id);
+    if (!existing) return res.status(404).json({ error: 'Library item not found.' });
+    const { item, error } = validCatalogItem(req.body, existing.kind);
+    if (error) return res.status(400).json({ error });
+    db.prepare(`UPDATE wellness_catalog_items SET name=?,name_ar=?,category=?,serving=?,serving_ar=?,calories=?,
+      protein_g=?,carbs_g=?,fat_g=?,sets=?,reps=?,duration_minutes=?,updated_at=? WHERE id=? AND user_id=?`)
+      .run(item.name, item.name_ar, item.category, item.serving, item.serving_ar, item.calories, item.protein_g,
+        item.carbs_g, item.fat_g, item.sets, item.reps, item.duration_minutes, now(), existing.id, req.user.id);
+    const row = db.prepare(`SELECT id,kind,catalog_key,name,name_ar,category,serving,serving_ar,calories,
+      protein_g,carbs_g,fat_g,sets,reps,duration_minutes FROM wellness_catalog_items WHERE id=? AND user_id=?`)
+      .get(existing.id, req.user.id);
+    res.json(catalogItem(row));
+  });
+
+  router.delete('/wellness/catalog/:id', (req, res) => {
+    const result = db.prepare('DELETE FROM wellness_catalog_items WHERE id=? AND user_id=?').run(req.params.id, req.user.id);
+    result.changes ? res.json({ ok: true }) : res.status(404).json({ error: 'Library item not found.' });
+  });
 
   router.get('/dashboard/preferences', (req, res) => {
     const userId = req.user.id;

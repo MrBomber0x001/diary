@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, todayDate } from '../api.js';
 import { messages } from '../i18n.js';
 import { useAppDialog } from '../components/AppDialogProvider.jsx';
@@ -12,6 +12,7 @@ export default function WellnessPage({ language, onUnauthorized }) {
   const [section, setSection] = useState('diet');
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
+  const formRef = useRef(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
   const [saving, setSaving] = useState(false);
@@ -23,14 +24,27 @@ export default function WellnessPage({ language, onUnauthorized }) {
   const [quickMeal, setQuickMeal] = useState({ meal_type: 'breakfast', name: '', calories: '', protein_g: '', carbs_g: '', fat_g: '', notes: '' });
   const [showMealDetails, setShowMealDetails] = useState(false);
   const [quickMealSaving, setQuickMealSaving] = useState(false);
+  const [foodSearch, setFoodSearch] = useState('');
+  const [selectedFood, setSelectedFood] = useState(null);
+  const [foodServings, setFoodServings] = useState(1);
+  const [exerciseSearch, setExerciseSearch] = useState('');
+  const [catalog, setCatalog] = useState({ foods: [], exercises: [] });
+  const [catalogType, setCatalogType] = useState('food');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogEditor, setCatalogEditor] = useState(null);
   const isArabic = language === 'ar';
   const t = messages[language];
+  const formOpen = Boolean(form);
+  const formKind = form?.kind;
+  const formId = form?.id;
 
   const load = useCallback(async () => {
     setError('');
     try {
       const result = await api(`/wellness?date=${date}`);
+      const catalogResult = await api('/wellness/catalog');
       setData(result);
+      setCatalog(catalogResult);
       setGoals({
         calorie_goal: result.profile.calorie_goal ?? '',
         protein_goal_g: result.profile.protein_goal_g ?? '',
@@ -44,6 +58,9 @@ export default function WellnessPage({ language, onUnauthorized }) {
   }, [date, onUnauthorized]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (formOpen) formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [formOpen, formKind, formId]);
 
   function editMeal(meal) {
     setForm({ kind: 'meal', value: { ...meal } });
@@ -101,6 +118,8 @@ export default function WellnessPage({ language, onUnauthorized }) {
         },
       });
       setQuickMeal(current => ({ ...current, name: '', calories: '', protein_g: '', carbs_g: '', fat_g: '', notes: '' }));
+      setSelectedFood(null);
+      setFoodServings(1);
       setSaved(isArabic ? 'تم تسجيل الوجبة.' : 'Meal logged.');
       await load();
     } catch (failure) {
@@ -216,6 +235,53 @@ export default function WellnessPage({ language, onUnauthorized }) {
     setForm(current => ({ ...current, value: { ...current.value, [key]: value } }));
   }
 
+  function updateCatalogField(key, value) {
+    setCatalogEditor(current => ({ ...current, value: { ...current.value, [key]: value } }));
+  }
+
+  async function saveCatalogItem(event) {
+    event.preventDefault();
+    if (!catalogEditor) return;
+    setError('');
+    setSaved('');
+    const isEditing = Boolean(catalogEditor.value.id);
+    const { id, ...value } = catalogEditor.value;
+    try {
+      await api(`/wellness/catalog${isEditing ? `/${id}` : ''}`, {
+        method: isEditing ? 'PUT' : 'POST',
+        body: { ...value, kind: catalogEditor.kind },
+      });
+      const updatedCatalog = await api('/wellness/catalog');
+      setCatalog(updatedCatalog);
+      setCatalogEditor(null);
+      setSaved(isArabic ? 'تم حفظ عنصر المكتبة.' : 'Library item saved.');
+    } catch (failure) {
+      if (failure.status === 401) onUnauthorized();
+      else setError(failure.message);
+    }
+  }
+
+  async function deleteCatalogItem(item) {
+    if (!await confirm({
+      title: isArabic ? 'حذف العنصر؟' : 'Delete library item?',
+      message: isArabic ? `سيتم حذف «${item.nameAr || item.name}» من مكتبتك.` : `Remove “${item.name}” from your library?`,
+      confirmLabel: isArabic ? 'حذف' : 'Delete',
+      danger: true,
+    })) return;
+    setError('');
+    try {
+      await api(`/wellness/catalog/${item.id}`, { method: 'DELETE' });
+      const updatedCatalog = await api('/wellness/catalog');
+      setCatalog(updatedCatalog);
+      if (selectedFood?.id === item.id) setSelectedFood(null);
+      if (catalogEditor?.value.id === item.id) setCatalogEditor(null);
+      setSaved(isArabic ? 'تم حذف العنصر من المكتبة.' : 'Library item deleted.');
+    } catch (failure) {
+      if (failure.status === 401) onUnauthorized();
+      else setError(failure.message);
+    }
+  }
+
   const number = value => new Intl.NumberFormat(isArabic ? 'ar' : 'en', { maximumFractionDigits: 1 }).format(Number(value || 0));
   const mealTypeName = type => ({
     breakfast: isArabic ? 'الإفطار' : 'Breakfast',
@@ -223,6 +289,67 @@ export default function WellnessPage({ language, onUnauthorized }) {
     dinner: isArabic ? 'العشاء' : 'Dinner',
     snack: isArabic ? 'وجبة خفيفة' : 'Snack',
   }[type] || type);
+  const exerciseCategoryName = category => ({
+    Strength: isArabic ? 'قوة' : 'Strength',
+    Bodyweight: isArabic ? 'وزن الجسم' : 'Bodyweight',
+    Cardio: isArabic ? 'كارديو' : 'Cardio',
+  }[category] || category);
+  const visibleFoods = foodSearch.trim()
+    ? catalog.foods.filter(food => `${food.name} ${food.nameAr} ${food.category}`.toLocaleLowerCase().includes(foodSearch.trim().toLocaleLowerCase())).slice(0, 8)
+    : [
+      ...catalog.foods.filter(food => food.category === 'Grains').slice(0, 2),
+      ...catalog.foods.filter(food => food.category === 'Fruit').slice(0, 2),
+      ...catalog.foods.filter(food => food.category === 'Protein').slice(0, 3),
+      ...catalog.foods.filter(food => food.category === 'Dairy').slice(0, 1),
+    ];
+  const visibleExercises = exerciseSearch.trim()
+    ? catalog.exercises.filter(exercise => `${exercise.name} ${exercise.nameAr} ${exercise.category}`.toLocaleLowerCase().includes(exerciseSearch.trim().toLocaleLowerCase())).slice(0, 10)
+    : [
+      ...catalog.exercises.filter(exercise => exercise.category === 'Strength').slice(0, 5),
+      ...catalog.exercises.filter(exercise => exercise.category === 'Bodyweight').slice(0, 2),
+      ...catalog.exercises.filter(exercise => exercise.category === 'Cardio').slice(0, 3),
+    ];
+  const fillFood = (food, servings = 1) => {
+    const amount = Number(servings);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 20) return;
+    const scaled = value => String(Math.round(value * amount * 10) / 10);
+    setSelectedFood(food);
+    setFoodServings(amount);
+    setQuickMeal(current => ({
+      ...current,
+      name: isArabic ? food.nameAr || food.name : food.name,
+      calories: String(Math.round(food.calories * amount)),
+      protein_g: scaled(food.protein),
+      carbs_g: scaled(food.carbs),
+      fat_g: scaled(food.fat),
+    }));
+    setShowMealDetails(true);
+  };
+  const chooseExercise = exercise => {
+    setForm({
+      kind: 'workout',
+      value: {
+        ...emptyWorkout(date),
+        exercise: isArabic ? exercise.nameAr : exercise.name,
+        sets: exercise.sets,
+        reps: exercise.reps,
+        duration_minutes: exercise.duration_minutes || '',
+      },
+    });
+    setError('');
+    setSaved('');
+  };
+  const currentCatalogItems = catalogType === 'food' ? catalog.foods : catalog.exercises;
+  const filteredCatalogItems = currentCatalogItems.filter(item =>
+    `${item.name} ${item.nameAr} ${item.category}`.toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase()));
+  const emptyCatalogItem = kind => ({
+    name: '',
+    nameAr: '',
+    category: kind === 'food' ? 'Other' : 'Strength',
+    ...(kind === 'food'
+      ? { serving: '', servingAr: '', calories: '', protein: '', carbs: '', fat: '' }
+      : { sets: 3, reps: 10, duration_minutes: '' }),
+  });
   const changeGoal = (key, value) => setGoals(current => ({ ...current, [key]: value }));
 
   if (!data) return <section className="page-card">{error || t.loading}</section>;
@@ -266,16 +393,104 @@ export default function WellnessPage({ language, onUnauthorized }) {
       <button className={`wellness-tab ${section === 'gym' ? 'active' : ''}`} type="button" role="tab" aria-selected={section === 'gym'} onClick={() => { setSection('gym'); setForm(null); }}>
         <span aria-hidden="true">↗</span>{isArabic ? 'النادي الرياضي' : 'Gym'}
       </button>
+      <button className={`wellness-tab ${section === 'library' ? 'active' : ''}`} type="button" role="tab" aria-selected={section === 'library'} onClick={() => { setSection('library'); setForm(null); setCatalogEditor(null); }}>
+        <span aria-hidden="true">▦</span>{isArabic ? 'مكتبتي' : 'My library'}
+      </button>
     </div>
 
     {error && <p className="notice error" role="alert">{error}</p>}
     {saved && <p className="notice" role="status">{saved}</p>}
 
+    {section === 'library' && <section className="wellness-library">
+      <header className="wellness-library-header">
+        <div><p className="eyebrow">{isArabic ? 'محتوى قابل للتخصيص' : 'YOUR PERSONAL DATABASE'}</p>
+          <h2>{isArabic ? 'مكتبة الغذاء والتمارين' : 'Food & exercise library'}</h2>
+          <p>{isArabic ? 'عدّل العناصر الجاهزة أو أضف عناصر خاصة بك. مكتبتك محفوظة لحسابك.' : 'Edit starter items or add your own. Your library is saved to your account.'}</p>
+        </div>
+        <button className="button button-primary" type="button" onClick={() => setCatalogEditor({ kind: catalogType, value: emptyCatalogItem(catalogType) })}>
+          + {isArabic ? 'إضافة عنصر' : 'Add item'}
+        </button>
+      </header>
+      <div className="wellness-library-summary">
+        <button className={`wellness-library-kind ${catalogType === 'food' ? 'active' : ''}`} type="button" onClick={() => { setCatalogType('food'); setCatalogEditor(null); }}>
+          <span aria-hidden="true">◉</span><span><strong>{isArabic ? 'الأطعمة' : 'Foods'}</strong><small>{number(catalog.foods.length)} {isArabic ? 'عنصر' : 'items'}</small></span>
+        </button>
+        <button className={`wellness-library-kind ${catalogType === 'exercise' ? 'active' : ''}`} type="button" onClick={() => { setCatalogType('exercise'); setCatalogEditor(null); }}>
+          <span aria-hidden="true">↗</span><span><strong>{isArabic ? 'التمارين' : 'Exercises'}</strong><small>{number(catalog.exercises.length)} {isArabic ? 'عنصر' : 'items'}</small></span>
+        </button>
+      </div>
+      <label className="wellness-catalog-search wellness-library-search">{isArabic ? 'ابحث في مكتبتك' : 'Search your library'}
+        <input type="search" value={catalogSearch} onChange={event => setCatalogSearch(event.target.value)}
+          placeholder={catalogType === 'food' ? (isArabic ? 'اسم الطعام أو الفئة…' : 'Food name or category…') : (isArabic ? 'اسم التمرين أو الفئة…' : 'Exercise name or category…')} />
+      </label>
+      {catalogEditor && <form className="wellness-catalog-editor" onSubmit={saveCatalogItem}>
+        <div className="wellness-catalog-editor-heading">
+          <div><h3>{catalogEditor.value.id ? (isArabic ? 'تعديل العنصر' : 'Edit item') : (isArabic ? 'عنصر جديد' : 'New item')}</h3>
+            <p>{catalogEditor.kind === 'food' ? (isArabic ? 'أدخل القيم لحصة واحدة.' : 'Enter values for one serving.') : (isArabic ? 'القيم المقترحة قابلة للتعديل عند التسجيل.' : 'Defaults can be adjusted when logging.')}</p></div>
+        </div>
+        <div className="wellness-catalog-editor-fields">
+          <label>{isArabic ? 'الاسم (إنجليزي)' : 'Name'}<input maxLength="120" value={catalogEditor.value.name} onChange={event => updateCatalogField('name', event.target.value)} required /></label>
+          <label>{isArabic ? 'الاسم بالعربية' : 'Arabic name'}<input maxLength="120" dir="auto" value={catalogEditor.value.nameAr} onChange={event => updateCatalogField('nameAr', event.target.value)} /></label>
+          <label>{isArabic ? 'الفئة' : 'Category'}<input maxLength="60" value={catalogEditor.value.category} onChange={event => updateCatalogField('category', event.target.value)} required /></label>
+          {catalogEditor.kind === 'food' ? <>
+            <label>{isArabic ? 'الحصة' : 'Serving'}<input maxLength="120" value={catalogEditor.value.serving} onChange={event => updateCatalogField('serving', event.target.value)} required /></label>
+            <label>{isArabic ? 'الحصة بالعربية' : 'Arabic serving'}<input maxLength="120" dir="auto" value={catalogEditor.value.servingAr} onChange={event => updateCatalogField('servingAr', event.target.value)} /></label>
+            <label>{isArabic ? 'السعرات' : 'Calories'}<input type="number" min="0" max="20000" step="1" value={catalogEditor.value.calories} onChange={event => updateCatalogField('calories', event.target.value)} required /></label>
+            <label>{isArabic ? 'البروتين (غ)' : 'Protein (g)'}<input type="number" min="0" max="1000" step="0.1" value={catalogEditor.value.protein} onChange={event => updateCatalogField('protein', event.target.value)} required /></label>
+            <label>{isArabic ? 'الكربوهيدرات (غ)' : 'Carbs (g)'}<input type="number" min="0" max="2000" step="0.1" value={catalogEditor.value.carbs} onChange={event => updateCatalogField('carbs', event.target.value)} required /></label>
+            <label>{isArabic ? 'الدهون (غ)' : 'Fat (g)'}<input type="number" min="0" max="1000" step="0.1" value={catalogEditor.value.fat} onChange={event => updateCatalogField('fat', event.target.value)} required /></label>
+          </> : <>
+            <label>{isArabic ? 'المجموعات المقترحة' : 'Default sets'}<input type="number" min="0" max="100" step="1" value={catalogEditor.value.sets} onChange={event => updateCatalogField('sets', event.target.value)} /></label>
+            <label>{isArabic ? 'التكرارات المقترحة' : 'Default reps'}<input type="number" min="0" max="1000" step="1" value={catalogEditor.value.reps} onChange={event => updateCatalogField('reps', event.target.value)} /></label>
+            <label>{isArabic ? 'المدة (دقيقة)' : 'Duration (minutes)'}<input type="number" min="0" max="1440" step="1" value={catalogEditor.value.duration_minutes} onChange={event => updateCatalogField('duration_minutes', event.target.value)} /></label>
+          </>}
+        </div>
+        <div className="editor-actions">
+          <button className="button button-primary" type="submit">{isArabic ? 'حفظ' : 'Save item'}</button>
+          <button className="button button-quiet" type="button" onClick={() => setCatalogEditor(null)}>{t.cancel}</button>
+        </div>
+      </form>}
+      <div className="wellness-managed-catalog">
+        {filteredCatalogItems.map(item => <article className="wellness-managed-item" key={item.id}>
+          <div className="wellness-managed-item-main">
+            <div className="wellness-managed-item-title"><h3>{isArabic ? item.nameAr || item.name : item.name}</h3>
+              <span className={item.isBuiltin ? 'wellness-catalog-badge starter' : 'wellness-catalog-badge'}>{item.isBuiltin ? (isArabic ? 'أساسي' : 'Starter') : (isArabic ? 'خاص بي' : 'Custom')}</span>
+            </div>
+            <p>{item.category}{catalogType === 'food'
+              ? ` · ${isArabic ? item.servingAr || item.serving : item.serving} · ${item.calories} kcal · P ${number(item.protein)} · C ${number(item.carbs)} · F ${number(item.fat)} g`
+              : ` · ${item.duration_minutes ? `${item.duration_minutes} ${isArabic ? 'دقيقة' : 'min'}` : `${item.sets} × ${item.reps}`}`}</p>
+          </div>
+          <div className="wellness-managed-actions">
+            <button className="button button-quiet" type="button" onClick={() => setCatalogEditor({ kind: catalogType, value: { ...item } })}>{isArabic ? 'تعديل' : 'Edit'}</button>
+            <button className="button button-quiet" type="button" onClick={() => deleteCatalogItem(item)}>{isArabic ? 'حذف' : 'Delete'}</button>
+          </div>
+        </article>)}
+        {filteredCatalogItems.length === 0 && <div className="wellness-library-empty">
+          <strong>{isArabic ? 'لا توجد نتائج' : 'No results'}</strong>
+          <p>{isArabic ? 'غيّر البحث أو أضف عنصراً جديداً إلى مكتبتك.' : 'Try another search or add a new item to your library.'}</p>
+        </div>}
+      </div>
+    </section>}
+
     {section === 'diet' && <section className="wellness-tools wellness-quick-meal">
       <div className="wellness-tool-heading"><div>
         <h2>{isArabic ? 'تسجيل سريع' : 'Quick log'}</h2>
-        <p>{isArabic ? 'اكتب اسم الوجبة فقط، وأضف تفاصيل التغذية إذا رغبت.' : 'Just name your meal. Add nutrition details only if you want.'}</p>
-      </div></div>
+        <p>{isArabic ? 'اختر طعاماً لإضافة القيم تلقائياً، أو اكتب وجبتك الخاصة.' : 'Choose foods to fill nutrition automatically, or enter a custom meal.'}</p>
+      </div><button className="button button-quiet" type="button" onClick={() => { setSection('library'); setCatalogType('food'); }}>{isArabic ? 'إدارة الأطعمة' : 'Manage foods'}</button></div>
+      <div className="wellness-catalog">
+        <label className="wellness-catalog-search">{isArabic ? 'ابحث عن طعام' : 'Find a food'}
+          <input type="search" value={foodSearch} onChange={event => setFoodSearch(event.target.value)}
+            placeholder={isArabic ? 'مثال: بيض، أرز، تفاح…' : 'e.g. eggs, rice, apple…'} />
+        </label>
+        <div className="wellness-catalog-results" aria-live="polite">
+          {visibleFoods.map(food => <button className={`wellness-catalog-item ${selectedFood?.id === food.id ? 'selected' : ''}`} type="button" key={food.id} onClick={() => fillFood(food)}>
+            <span><strong>{isArabic ? food.nameAr || food.name : food.name}</strong><small>{isArabic ? food.servingAr || food.serving : food.serving}</small></span>
+            <span className="wellness-catalog-nutrition"><strong>{food.calories} kcal</strong><small>P {number(food.protein)} · C {number(food.carbs)} · F {number(food.fat)} g</small></span>
+          </button>)}
+          {visibleFoods.length === 0 && <p className="wellness-catalog-empty">{isArabic ? 'لا توجد أطعمة مطابقة. يمكنك كتابة اسمها يدوياً.' : 'No matching foods. You can still enter a custom meal below.'}</p>}
+        </div>
+        <p className="wellness-catalog-note">{isArabic ? 'القيم تقديرية للحصة المذكورة؛ راجع ملصق المنتج عند الحاجة للدقة.' : 'Nutrition is an estimate per listed serving; check the product label when accuracy matters.'}</p>
+      </div>
       <form className="wellness-quick-meal-form" onSubmit={saveQuickMeal}>
         <label className="wellness-quick-meal-name">{isArabic ? 'ماذا أكلت؟' : 'What did you eat?'}
           <input autoComplete="off" maxLength="160" value={quickMeal.name} onChange={event => setQuickMeal(current => ({ ...current, name: event.target.value }))}
@@ -292,6 +507,14 @@ export default function WellnessPage({ language, onUnauthorized }) {
         <button className="wellness-meal-details-toggle" type="button" aria-expanded={showMealDetails} onClick={() => setShowMealDetails(value => !value)}>
           {showMealDetails ? '−' : '+'} {showMealDetails ? (isArabic ? 'إخفاء التفاصيل' : 'Hide details') : (isArabic ? 'إضافة السعرات والمغذيات (اختياري)' : 'Add calories and macros (optional)')}
         </button>
+        {selectedFood && <label className="wellness-food-servings">{isArabic ? `الحصص · ${selectedFood.servingAr}` : `Servings · ${selectedFood.serving}`}
+          <input type="number" min="0.25" max="20" step="0.25" value={foodServings}
+            onChange={event => {
+              const value = event.target.value;
+              setFoodServings(value);
+              if (value && Number(value) > 0 && Number(value) <= 20) fillFood(selectedFood, value);
+            }} />
+        </label>}
         {showMealDetails && <div className="wellness-quick-meal-details">
           <label>{isArabic ? 'السعرات' : 'Calories'}<input type="number" min="0" max="20000" step="1" value={quickMeal.calories} onChange={event => setQuickMeal(current => ({ ...current, calories: event.target.value }))} /></label>
           <label>{isArabic ? 'البروتين (غ)' : 'Protein (g)'}<input type="number" min="0" max="1000" step="0.1" value={quickMeal.protein_g} onChange={event => setQuickMeal(current => ({ ...current, protein_g: event.target.value }))} /></label>
@@ -330,7 +553,7 @@ export default function WellnessPage({ language, onUnauthorized }) {
           {data.profile.protein_goal_g && <GoalProgress label={isArabic ? 'البروتين' : 'Protein'} value={data.summary.protein_g} goal={data.profile.protein_goal_g} unit="g" />}
         </div>
       </section>
-    </> : <>
+    </> : section === 'gym' ? <>
       <div className="metric-grid wellness-metrics">
         <Metric label={isArabic ? 'تمارين اليوم' : 'Exercises today'} value={number(data.summary.sessions)} />
         <Metric label={isArabic ? 'مدة التمرين' : 'Training time'} value={number(data.summary.duration_minutes)} suffix={isArabic ? 'دقيقة' : 'min'} />
@@ -338,6 +561,24 @@ export default function WellnessPage({ language, onUnauthorized }) {
         <Metric label={isArabic ? 'تمارين هذا الأسبوع' : 'Exercises this week'} value={number(data.week.sessions)} />
       </div>
       <div className="wellness-week"><strong>{isArabic ? 'آخر ٧ أيام' : 'Last 7 days'}</strong><span>{number(data.week.duration_minutes)} {isArabic ? 'دقيقة تدريب' : 'training minutes'}</span><span>{number(data.week.volume_kg)} kg {isArabic ? 'حجم الأوزان' : 'volume lifted'}</span></div>
+      <section className="wellness-tools wellness-exercise-catalog">
+        <div className="wellness-tool-heading"><div><h2>{isArabic ? 'مكتبة التمارين' : 'Exercise library'}</h2><p>{isArabic ? 'اختر تمريناً لبدء سجل قابل للتعديل.' : 'Choose an exercise to start an editable workout log.'}</p></div>
+          <button className="button button-quiet" type="button" onClick={() => { setSection('library'); setCatalogType('exercise'); }}>{isArabic ? 'إدارة التمارين' : 'Manage exercises'}</button>
+        </div>
+        <label className="wellness-catalog-search">{isArabic ? 'ابحث عن تمرين' : 'Find an exercise'}
+          <input type="search" value={exerciseSearch} onChange={event => setExerciseSearch(event.target.value)}
+            placeholder={isArabic ? 'مثال: سكوات، صدر، مشي…' : 'e.g. squat, chest, walking…'} />
+        </label>
+        <div className="wellness-catalog-results" aria-live="polite">
+          {visibleExercises.map(exercise => <button className="wellness-catalog-item" type="button" key={exercise.id} onClick={() => chooseExercise(exercise)}>
+            <span><strong>{isArabic ? exercise.nameAr : exercise.name}</strong><small>{exerciseCategoryName(exercise.category)}</small></span>
+            <span className="wellness-catalog-nutrition"><strong>{exercise.duration_minutes
+              ? `${exercise.duration_minutes} ${isArabic ? 'دقيقة' : 'min'}`
+              : `${exercise.sets} × ${exercise.reps}`}</strong><small>{isArabic ? 'اختيار' : 'Select'} →</small></span>
+          </button>)}
+          {visibleExercises.length === 0 && <p className="wellness-catalog-empty">{isArabic ? 'لا توجد تمارين مطابقة. يمكنك كتابة تمرينك يدوياً.' : 'No matching exercises. You can still enter a custom exercise.'}</p>}
+        </div>
+      </section>
       {data.templates.length > 0 && <section className="wellness-tools">
         <div className="wellness-tool-heading"><div><h2>{isArabic ? 'قوالب التمرين' : 'Workout templates'}</h2><p>{isArabic ? 'ابدأ سجلاً جديداً من قالب محفوظ.' : 'Start a new log from a saved template.'}</p></div></div>
         <div className="wellness-template-list">{data.templates.map(template => <div className="wellness-template" key={template.id}>
@@ -347,8 +588,9 @@ export default function WellnessPage({ language, onUnauthorized }) {
           <button className="icon-button" type="button" aria-label={isArabic ? `حذف قالب ${template.name}` : `Delete ${template.name} template`} onClick={() => removeEntry('templates', template.id)}>×</button>
         </div>)}</div>
       </section>}
-    </>}
+    </> : null}
 
+    {section !== 'library' && <>
     <div className="wellness-tracking-grid">
       <section className="wellness-tools wellness-water-tool">
         <div className="wellness-tool-heading">
@@ -443,7 +685,7 @@ export default function WellnessPage({ language, onUnauthorized }) {
       </button>
     </div>
 
-    {form && <form className="wellness-form" onSubmit={saveEntry}>
+    {form && <form className="wellness-form" ref={formRef} onSubmit={saveEntry}>
       <h3>{isMealForm ? (isArabic ? 'تفاصيل الوجبة' : 'Meal details') : (isArabic ? 'تفاصيل التمرين' : 'Exercise details')}</h3>
       <label>{isArabic ? 'التاريخ' : 'Date'}<input type="date" required value={form.value.entry_date || date} onChange={event => updateField('entry_date', event.target.value)} /></label>
       <div className="wellness-fields">
@@ -478,6 +720,7 @@ export default function WellnessPage({ language, onUnauthorized }) {
           <button className="button button-quiet" type="button" onClick={() => removeEntry(section === 'diet' ? 'meals' : 'workouts', record.id)}>{t.delete}</button>
         </div>
       </article>)}</div>}
+    </>}
   </section>;
 }
 
