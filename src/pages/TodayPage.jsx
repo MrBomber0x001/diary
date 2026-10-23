@@ -237,22 +237,24 @@ export default function TodayPage({ language, onUnauthorized }) {
           <h2>{language === 'ar' ? 'العادات والروتين' : 'Habits & routines'}</h2></div>
           <Link className="button button-quiet" to="/?view=habits">{language === 'ar' ? 'إدارة العادات' : 'Manage habits'} →</Link>
         </header>
-        <div className="dashboard-habit-summary">
-          <span>{language === 'ar' ? 'العادات' : 'Habits'} <strong>{today.habits.completed}/{today.habits.total}</strong></span>
-          <span>{language === 'ar' ? 'الروتينات' : 'Routines'} <strong>{today.routines.completed}/{today.routines.total}</strong></span>
-        </div>
-        {today.habitItems.length + today.routineItems.length > 0
-          ? <div className="dashboard-checkin-list">
-            {[...today.habitItems.map(item => ({ ...item, kind: 'habits' })), ...today.routineItems.map(item => ({ ...item, kind: 'routines' }))].map(item => {
-              const key = `${item.kind}-${item.id}`;
-              return <label className="dashboard-checkin" key={key}>
-                <input type="checkbox" checked={Boolean(item.completed_today)} disabled={savingCheckin === key}
-                  onChange={() => toggleCheckin(item.kind, item)} />
-                <span dir="auto">{item.title}</span>
-              </label>;
-            })}
+        <div className="dashboard-habits-content">
+          <div className="dashboard-habit-summary">
+            <article><span>{language === 'ar' ? 'العادات' : 'Habits'}</span><strong>{today.habits.completed}/{today.habits.total}</strong></article>
+            <article><span>{language === 'ar' ? 'الروتينات' : 'Routines'}</span><strong>{today.routines.completed}/{today.routines.total}</strong></article>
           </div>
-          : <p className="dashboard-checkin-empty">{language === 'ar' ? 'أضف عادات أو روتيناً لتظهر هنا.' : 'Add habits or routines to see them here.'}</p>}
+          {today.habitItems.length + today.routineItems.length > 0
+            ? <div className="dashboard-checkin-list">
+              {[...today.habitItems.map(item => ({ ...item, kind: 'habits' })), ...today.routineItems.map(item => ({ ...item, kind: 'routines' }))].map(item => {
+                const key = `${item.kind}-${item.id}`;
+                return <label className={`dashboard-checkin ${item.completed_today ? 'completed' : ''}`} key={key}>
+                  <input type="checkbox" checked={Boolean(item.completed_today)} disabled={savingCheckin === key}
+                    onChange={() => toggleCheckin(item.kind, item)} />
+                  <span dir="auto">{item.title}</span>
+                </label>;
+              })}
+            </div>
+            : <p className="dashboard-checkin-empty">{language === 'ar' ? 'أضف عادات أو روتيناً لتظهر هنا.' : 'Add habits or routines to see them here.'}</p>}
+        </div>
       </section>}
     </>
   );

@@ -4,6 +4,7 @@ import { messages } from '../i18n.js';
 import Editor from '../components/Editor.jsx';
 import ActionIcon from '../components/ActionIcon.jsx';
 import { Link } from '../navigation.jsx';
+import { useAppDialog } from '../components/AppDialogProvider.jsx';
 
 const eventFields = [
   { key: 'title', label: 'عنوان الموعد', required: true },
@@ -53,6 +54,7 @@ function localDateTime(value) {
 }
 
 export default function CalendarPage({ initialDate, language, onUnauthorized }) {
+  const { confirm } = useAppDialog();
   const [month, setMonth] = useState(() => {
     const today = new Date(`${initialDate || todayDate()}T12:00:00`);
     return new Date(today.getFullYear(), today.getMonth(), 1, 12);
@@ -119,7 +121,12 @@ export default function CalendarPage({ initialDate, language, onUnauthorized }) 
   }
 
   async function remove(event) {
-    if (!window.confirm(language === 'ar' ? 'حذف هذا الموعد وكل تكراراته؟' : 'Delete this event and its recurring occurrences?')) return;
+    if (!await confirm({
+      title: language === 'ar' ? 'حذف الموعد؟' : 'Delete event?',
+      message: language === 'ar' ? 'سيتم حذف هذا الموعد وكل تكراراته.' : 'This event and all of its recurring occurrences will be deleted.',
+      confirmLabel: language === 'ar' ? 'حذف الموعد' : 'Delete event',
+      danger: true,
+    })) return;
     try {
       await api(`/events/${event.id}`, { method: 'DELETE' });
       await load();

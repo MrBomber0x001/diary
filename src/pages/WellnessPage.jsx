@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, todayDate } from '../api.js';
 import { messages } from '../i18n.js';
+import { useAppDialog } from '../components/AppDialogProvider.jsx';
 
 const emptyMeal = date => ({ entry_date: date, meal_type: 'breakfast', name: '', calories: '', protein_g: '', carbs_g: '', fat_g: '', notes: '' });
 const emptyWorkout = date => ({ entry_date: date, exercise: '', sets: '', reps: '', weight_kg: '', duration_minutes: '', notes: '' });
 
 export default function WellnessPage({ language, onUnauthorized }) {
+  const { confirm, prompt } = useAppDialog();
   const [date, setDate] = useState(todayDate());
   const [section, setSection] = useState('diet');
   const [data, setData] = useState(null);
@@ -14,6 +16,8 @@ export default function WellnessPage({ language, onUnauthorized }) {
   const [saved, setSaved] = useState('');
   const [saving, setSaving] = useState(false);
   const [wellnessSaving, setWellnessSaving] = useState(false);
+  const [waterSaving, setWaterSaving] = useState(false);
+  const [showAllWater, setShowAllWater] = useState(false);
   const [weightInput, setWeightInput] = useState('');
   const [goals, setGoals] = useState(null);
   const isArabic = language === 'ar';
@@ -75,7 +79,12 @@ export default function WellnessPage({ language, onUnauthorized }) {
   }
 
   async function removeEntry(kind, id) {
-    if (!window.confirm(isArabic ? 'هل تريد حذف هذا السجل؟' : 'Delete this entry?')) return;
+    if (!await confirm({
+      title: isArabic ? 'حذف السجل؟' : 'Delete entry?',
+      message: isArabic ? 'سيتم حذف هذا السجل نهائياً.' : 'This entry will be permanently deleted.',
+      confirmLabel: isArabic ? 'حذف السجل' : 'Delete entry',
+      danger: true,
+    })) return;
     setError('');
     try {
       await api(`/wellness/${kind}/${id}`, { method: 'DELETE' });
@@ -103,6 +112,8 @@ export default function WellnessPage({ language, onUnauthorized }) {
   }
 
   async function addWater(amount) {
+    if (waterSaving) return;
+    setWaterSaving(true);
     setError('');
     try {
       await api('/wellness/water', { method: 'POST', body: { entry_date: date, amount_ml: amount } });
@@ -110,6 +121,8 @@ export default function WellnessPage({ language, onUnauthorized }) {
     } catch (failure) {
       if (failure.status === 401) onUnauthorized();
       else setError(failure.message);
+    } finally {
+      setWaterSaving(false);
     }
   }
 
@@ -127,8 +140,14 @@ export default function WellnessPage({ language, onUnauthorized }) {
   }
 
   async function saveTemplate(workout) {
-    const name = window.prompt(isArabic ? 'اسم قالب التمرين' : 'Workout template name', workout.exercise);
-    if (!name?.trim()) return;
+    const name = await prompt({
+      title: isArabic ? 'حفظ قالب تمرين' : 'Save workout template',
+      message: isArabic ? 'اختر اسماً يسهل تذكره لهذا القالب.' : 'Choose a memorable name for this template.',
+      inputLabel: isArabic ? 'اسم القالب' : 'Template name',
+      initialValue: workout.exercise,
+      confirmLabel: isArabic ? 'حفظ القالب' : 'Save template',
+    });
+    if (name === null || !name.trim()) return;
     setError('');
     try {
       await api('/wellness/templates', { method: 'POST', body: { ...workout, name: name.trim() } });
@@ -155,6 +174,9 @@ export default function WellnessPage({ language, onUnauthorized }) {
 
   if (!data) return <section className="page-card">{error || t.loading}</section>;
   const records = section === 'diet' ? data.meals : data.workouts;
+  const waterGoal = Number(data.profile.water_goal_ml) || 2000;
+  const waterProgress = Math.min(100, Math.round(Number(data.water_total_ml) / waterGoal * 100));
+  const visibleWaterEntries = showAllWater ? data.water : data.water.slice(0, 4);
   const isMealForm = form?.kind === 'meal';
   const fields = isMealForm
     ? [
@@ -182,7 +204,7 @@ export default function WellnessPage({ language, onUnauthorized }) {
         <h1>{isArabic ? 'الغذاء واللياقة' : 'Diet & gym'}</h1>
         <p>{isArabic ? 'سجّل وجباتك وتمارينك، وتابع تقدمك اليومي والأسبوعي.' : 'Log meals and workouts, then follow your daily and weekly progress.'}</p>
       </div>
-      <label>{isArabic ? 'التاريخ' : 'Date'}<input type="date" value={date} onChange={event => { setDate(event.target.value); setForm(null); setSaved(''); }} /></label>
+      <label>{isArabic ? 'التاريخ' : 'Date'}<input type="date" value={date} onChange={event => { setDate(event.target.value); setForm(null); setSaved(''); setShowAllWater(false); }} /></label>
     </header>
     <div className="wellness-tabs" role="tablist" aria-label={isArabic ? 'قسم اللياقة' : 'Wellness section'}>
       <button className={`wellness-tab ${section === 'diet' ? 'active' : ''}`} type="button" role="tab" aria-selected={section === 'diet'} onClick={() => { setSection('diet'); setForm(null); }}>
@@ -238,14 +260,50 @@ export default function WellnessPage({ language, onUnauthorized }) {
 
     <div className="wellness-tracking-grid">
       <section className="wellness-tools wellness-water-tool">
-        <div className="wellness-tool-heading"><div><h2>{isArabic ? 'شرب الماء' : 'Water tracker'}</h2><p>{number(data.water_total_ml)} / {data.profile.water_goal_ml ? `${number(data.profile.water_goal_ml)} ml` : (isArabic ? 'مل اليوم' : 'ml today')}</p></div>
-          <div className="wellness-water-actions"><button className="button button-quiet" type="button" onClick={() => addWater(250)}>+250 ml</button><button className="button button-quiet" type="button" onClick={() => addWater(500)}>+500 ml</button></div>
+        <div className="wellness-tool-heading">
+          <div><h2>{isArabic ? 'شرب الماء' : 'Water tracker'}</h2><p>{isArabic ? 'اضغط الدائرة لتسجيل كوب ماء.' : 'Tap the circle to log a glass of water.'}</p></div>
         </div>
-        {data.profile.water_goal_ml && <GoalProgress label={isArabic ? 'هدف الماء' : 'Water goal'} value={data.water_total_ml} goal={data.profile.water_goal_ml} unit="ml" />}
+        <div className="wellness-water-main">
+          <button
+            className="water-progress-button"
+            type="button"
+            style={{ '--water-progress': `${waterProgress}%` }}
+            onClick={() => addWater(250)}
+            disabled={waterSaving}
+            aria-label={isArabic
+              ? `إضافة ٢٥٠ مل ماء. شربت ${number(data.water_total_ml)} مل${data.profile.water_goal_ml ? ` من هدف ${number(data.profile.water_goal_ml)} مل` : ''}`
+              : `Add 250 ml of water. ${number(data.water_total_ml)} ml logged${data.profile.water_goal_ml ? ` of ${number(data.profile.water_goal_ml)} ml goal` : ''}`}
+          >
+            <span className="water-progress-content">
+              <strong>{number(data.water_total_ml)}</strong>
+              <small>{isArabic ? 'مل اليوم' : 'ml today'}</small>
+              <span className="water-progress-add">{waterSaving ? '…' : '+ 250 ml'}</span>
+            </span>
+          </button>
+          <div className="wellness-water-controls">
+            <div className="wellness-water-summary">
+              <strong>{data.profile.water_goal_ml ? `${number(waterProgress)}%` : (isArabic ? 'هدف مرئي' : 'Daily guide')}</strong>
+              <span>{data.profile.water_goal_ml
+                ? (isArabic ? `من هدف ${number(data.profile.water_goal_ml)} مل` : `of ${number(data.profile.water_goal_ml)} ml goal`)
+                : (isArabic ? '٢٬٠٠٠ مل · اضبط هدفك في الأهداف الغذائية' : '2,000 ml · set a personal goal above')}</span>
+            </div>
+            <div className="wellness-water-actions">
+              <button className="button button-quiet" type="button" onClick={() => addWater(500)} disabled={waterSaving}>+500 ml</button>
+            </div>
+          </div>
+        </div>
         {data.water.length > 0
-          ? <div className="wellness-water-list">{data.water.map(entry => <span key={entry.id}>{number(entry.amount_ml)} ml
-            <button type="button" aria-label={isArabic ? 'حذف إدخال الماء' : 'Remove water entry'} onClick={() => removeEntry('water', entry.id)}>×</button>
-          </span>)}</div>
+          ? <div className="wellness-water-history">
+            <span className="wellness-water-history-label">{isArabic ? 'سجلات اليوم' : 'Today’s entries'}</span>
+            <div className="wellness-water-list">{visibleWaterEntries.map(entry => <span key={entry.id}>{number(entry.amount_ml)} ml
+              <button type="button" aria-label={isArabic ? `حذف إدخال ${number(entry.amount_ml)} مل من الماء` : `Remove ${number(entry.amount_ml)} ml water entry`} onClick={() => removeEntry('water', entry.id)}>×</button>
+            </span>)}</div>
+            {data.water.length > 4 && <button className="wellness-water-history-toggle" type="button" onClick={() => setShowAllWater(value => !value)} aria-expanded={showAllWater}>
+              {showAllWater
+                ? (isArabic ? 'عرض أقل' : 'Show less')
+                : (isArabic ? `عرض كل السجلات (${number(data.water.length)})` : `Show all ${number(data.water.length)} entries`)}
+            </button>}
+          </div>
           : <p className="wellness-tracking-empty">{isArabic ? 'لم تسجل ماءً اليوم بعد.' : 'No water logged yet today.'}</p>}
       </section>
       <section className="wellness-tools wellness-weight-tool">

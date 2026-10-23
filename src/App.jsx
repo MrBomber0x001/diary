@@ -4,6 +4,7 @@ import { currentLocation, Link, navigate, useLocation } from './navigation.jsx';
 import { messages } from './i18n.js';
 import AuthScreen from './components/AuthScreen.jsx';
 import AppShell from './components/AppShell.jsx';
+import { AppDialogProvider } from './components/AppDialogProvider.jsx';
 import { FocusSessionProvider } from './components/FocusSessionContext.jsx';
 import CollectionPage from './pages/CollectionPage.jsx';
 import CalendarPage from './pages/CalendarPage.jsx';
@@ -134,19 +135,21 @@ export default function App() {
   if (checking) return <main className="auth-screen"><p>{messages[language].loading}</p></main>;
   if (!user) return <div lang={language} dir={language === 'ar' ? 'rtl' : 'ltr'}><AuthScreen hasUsers={hasUsers} language={language} setLanguage={changeLanguage} onAuthenticated={setUser} /></div>;
   return <div lang={language} dir={language === 'ar' ? 'rtl' : 'ltr'}>
-    <FocusSessionProvider userId={user.id} onUnauthorized={unauthorized}>
-      <AppShell user={user} page={route.page} language={language} themeMode={themeMode} themeError={themeError} audioItem={audioItem}
-        onAudioStop={() => setAudioItem(null)} onThemeToggle={toggleTheme} setLanguage={changeLanguage} onLogout={logout} onUnauthorized={unauthorized}>
-        {content}
-        {['notes', 'bookmarks', 'snippets', 'daily-note'].includes(route.page) && <section className="page-card">
-          <div className="record-actions">
-            <Link className="button button-quiet" to="/?view=notes">المقالات</Link>
-            <Link className="button button-quiet" to="/?view=bookmarks">الروابط المحفوظة</Link>
-            <Link className="button button-quiet" to="/?view=daily-note">المذكرة اليومية</Link>
-            <Link className="button button-quiet" to="/?view=snippets">المقاطع البرمجية</Link>
-          </div>
-        </section>}
-      </AppShell>
-    </FocusSessionProvider>
+    <AppDialogProvider language={language}>
+      <FocusSessionProvider userId={user.id} onUnauthorized={unauthorized}>
+        <AppShell user={user} page={route.page} language={language} themeMode={themeMode} themeError={themeError} audioItem={audioItem}
+          onAudioStop={() => setAudioItem(null)} onThemeToggle={toggleTheme} setLanguage={changeLanguage} onLogout={logout} onUnauthorized={unauthorized}>
+          {content}
+          {['notes', 'bookmarks', 'snippets', 'daily-note'].includes(route.page) && <section className="page-card">
+            <div className="record-actions">
+              <Link className="button button-quiet" to="/?view=notes">المقالات</Link>
+              <Link className="button button-quiet" to="/?view=bookmarks">الروابط المحفوظة</Link>
+              <Link className="button button-quiet" to="/?view=daily-note">المذكرة اليومية</Link>
+              <Link className="button button-quiet" to="/?view=snippets">المقاطع البرمجية</Link>
+            </div>
+          </section>}
+        </AppShell>
+      </FocusSessionProvider>
+    </AppDialogProvider>
   </div>;
 }

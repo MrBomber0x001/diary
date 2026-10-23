@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useAppDialog } from './AppDialogProvider.jsx';
 
 export default function AIConnectionSettings({ language, onUnauthorized }) {
   const arabic = language === 'ar';
+  const { confirm } = useAppDialog();
   const [connection, setConnection] = useState(null);
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
   const [model, setModel] = useState('');
@@ -69,7 +71,12 @@ export default function AIConnectionSettings({ language, onUnauthorized }) {
   }
 
   async function removeConnection() {
-    if (!window.confirm(arabic ? 'إزالة اتصال الذكاء الاصطناعي ومفتاحه؟' : 'Remove the AI connection and its API key?')) return;
+    if (!await confirm({
+      title: arabic ? 'إزالة اتصال الذكاء الاصطناعي؟' : 'Remove AI connection?',
+      message: arabic ? 'سيتم حذف الاتصال ومفتاح API المحفوظ.' : 'This will remove the connection and its saved API key.',
+      confirmLabel: arabic ? 'إزالة الاتصال' : 'Remove connection',
+      danger: true,
+    })) return;
     setBusy(true);
     setError('');
     setMessage('');

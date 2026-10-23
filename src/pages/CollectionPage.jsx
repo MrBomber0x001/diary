@@ -6,6 +6,7 @@ import Editor from '../components/Editor.jsx';
 import ActionIcon from '../components/ActionIcon.jsx';
 import EditorDialog from '../components/EditorDialog.jsx';
 import { todayDate } from '../api.js';
+import { useAppDialog } from '../components/AppDialogProvider.jsx';
 
 function displayValue(value) {
   if (value === null || value === undefined || value === '') return '';
@@ -24,6 +25,7 @@ function bookmarkHostname(url) {
 }
 
 export default function CollectionPage({ config, language, onUnauthorized, query = '' }) {
+  const { confirm } = useAppDialog();
   const [rows, setRows] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -161,7 +163,12 @@ export default function CollectionPage({ config, language, onUnauthorized, query
   }
 
   async function remove(row) {
-    if (!window.confirm(language === 'ar' ? 'هل تريد حذف هذا العنصر؟' : 'Delete this item?')) return;
+    if (!await confirm({
+      title: language === 'ar' ? 'حذف العنصر؟' : 'Delete item?',
+      message: language === 'ar' ? `هل تريد حذف «${row.title || row.name || config.singular}»؟ لا يمكن التراجع عن هذا الإجراء.` : `Delete “${row.title || row.name || config.singular}”? This action can’t be undone.`,
+      confirmLabel: language === 'ar' ? 'حذف' : 'Delete',
+      danger: true,
+    })) return;
     try {
       await api(`${writeEndpoint}/${row.id}`, { method: 'DELETE' });
       setRows(current => current.filter(item => item.id !== row.id));

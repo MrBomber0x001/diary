@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { useAppDialog } from './AppDialogProvider.jsx';
 
 const FocusSessionContext = createContext(null);
 
@@ -19,6 +20,7 @@ function getSavedSession(storageKey) {
 }
 
 export function FocusSessionProvider({ userId, onUnauthorized, children }) {
+  const { confirm } = useAppDialog();
   const storageKey = `personal-memo-focus-session-${userId}`;
   const [session, setSession] = useState(() => getSavedSession(storageKey));
   const [now, setNow] = useState(Date.now());
@@ -100,7 +102,12 @@ export function FocusSessionProvider({ userId, onUnauthorized, children }) {
   }, [handleFailure, session]);
 
   const discardSession = useCallback(async () => {
-    if (!session || !window.confirm(document.documentElement.lang === 'ar' ? 'هل تريد إلغاء جلسة التركيز الحالية؟' : 'Discard this focus session?')) return;
+    if (!session || !await confirm({
+      title: document.documentElement.lang === 'ar' ? 'إلغاء جلسة التركيز؟' : 'Discard focus session?',
+      message: document.documentElement.lang === 'ar' ? 'سيتم حذف الجلسة الحالية وتقدمها.' : 'The current session and its progress will be discarded.',
+      confirmLabel: document.documentElement.lang === 'ar' ? 'إلغاء الجلسة' : 'Discard session',
+      danger: true,
+    })) return;
     setBusy(true);
     setError('');
     try {
@@ -111,7 +118,7 @@ export function FocusSessionProvider({ userId, onUnauthorized, children }) {
     } finally {
       setBusy(false);
     }
-  }, [handleFailure, session]);
+  }, [confirm, handleFailure, session]);
 
   const seconds = session
     ? session.elapsedSeconds + (session.paused ? 0 : Math.max(0, Math.floor((now - session.startedAt) / 1000)))

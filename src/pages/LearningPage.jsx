@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import Editor from '../components/Editor.jsx';
 import { messages } from '../i18n.js';
 import ActionIcon from '../components/ActionIcon.jsx';
+import { useAppDialog } from '../components/AppDialogProvider.jsx';
 
 const topicFields = [
   { key: 'title', label: 'الموضوع', required: true },
@@ -15,6 +16,7 @@ const noteFields = [
 ];
 
 export default function LearningPage({ language, onUnauthorized }) {
+  const { confirm } = useAppDialog();
   const [topics, setTopics] = useState([]);
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -48,7 +50,12 @@ export default function LearningPage({ language, onUnauthorized }) {
     } catch (failure) { setError(failure.message); }
   }
   async function deleteTopic(id) {
-    if (!window.confirm(language === 'ar' ? 'حذف الموضوع وملاحظاته؟' : 'Delete this topic and its notes?')) return;
+    if (!await confirm({
+      title: language === 'ar' ? 'حذف الموضوع؟' : 'Delete topic?',
+      message: language === 'ar' ? 'سيتم حذف الموضوع وجميع ملاحظاته وملفاته.' : 'This topic, its notes, and attached files will be deleted.',
+      confirmLabel: language === 'ar' ? 'حذف الموضوع' : 'Delete topic',
+      danger: true,
+    })) return;
     try { await api(`/learning/topics/${id}`, { method: 'DELETE' }); setTopics(current => current.filter(row => row.id !== id)); setSelected(null); }
     catch (failure) { setError(failure.message); }
   }

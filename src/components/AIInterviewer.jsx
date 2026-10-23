@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Link } from '../navigation.jsx';
+import { useAppDialog } from './AppDialogProvider.jsx';
 
 const initialSetup = {
   role: '',
@@ -16,6 +17,7 @@ const initialSetup = {
 
 export default function AIInterviewer({ language, onUnauthorized }) {
   const arabic = language === 'ar';
+  const { confirm } = useAppDialog();
   const [connection, setConnection] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [setup, setSetup] = useState(initialSetup);
@@ -135,7 +137,12 @@ export default function AIInterviewer({ language, onUnauthorized }) {
   }
 
   async function deleteSession(id) {
-    if (!window.confirm(arabic ? 'حذف سجل هذه الجلسة؟' : 'Delete this session history?')) return;
+    if (!await confirm({
+      title: arabic ? 'حذف سجل الجلسة؟' : 'Delete session history?',
+      message: arabic ? 'سيتم حذف سجل هذه الجلسة نهائياً.' : 'This session history will be permanently deleted.',
+      confirmLabel: arabic ? 'حذف السجل' : 'Delete history',
+      danger: true,
+    })) return;
     try {
       await api(`/interviews/ai/sessions/${id}`, { method: 'DELETE' });
       setSessions(current => current.filter(item => item.id !== id));
