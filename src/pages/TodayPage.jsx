@@ -15,6 +15,8 @@ export default function TodayPage({ language, onUnauthorized }) {
   const [error, setError] = useState('');
   const [savingTask, setSavingTask] = useState(null);
   const [savingCheckin, setSavingCheckin] = useState('');
+  const [savingWater, setSavingWater] = useState(false);
+  const [waterError, setWaterError] = useState('');
   const [focusMinutes, setFocusMinutes] = useState(25);
   const [focusContext, setFocusContext] = useState('');
   const { session, seconds, busy: focusBusy, error: focusError, startSession, pauseSession, resumeSession, completeSession } = useFocusSession();
@@ -82,6 +84,21 @@ export default function TodayPage({ language, onUnauthorized }) {
     }
   }
 
+  async function logWater() {
+    if (savingWater) return;
+    setSavingWater(true);
+    setWaterError('');
+    try {
+      await api('/wellness/water', { method: 'POST', body: { entry_date: today.date, amount_ml: 250 } });
+      await load();
+    } catch (failure) {
+      if (failure.status === 401) onUnauthorized();
+      else setWaterError(failure.message);
+    } finally {
+      setSavingWater(false);
+    }
+  }
+
   if (error) return <p className="notice error" role="alert">{error}</p>;
   if (!today) return <section className="page-card">{t.loading}</section>;
   const completedSessions = Number(focusStats?.completed_sessions || 0);
@@ -105,6 +122,7 @@ export default function TodayPage({ language, onUnauthorized }) {
         <div className="welcome-actions">
           <Link className="button button-primary" to="/?view=tasks">＋ {language === 'ar' ? 'أضف مهمة' : 'Add a task'}</Link>
           <Link className="button home-daily-note-button" to="/?view=daily-note">✎ {language === 'ar' ? 'المذكرة اليومية' : 'Daily note'}</Link>
+          <Link className="button button-quiet" to="/?view=memories">♡ {language === 'ar' ? 'أضف ذكرى' : 'Add a memory'}</Link>
           <button className="button welcome-customize-button" type="button" aria-expanded={customizing} onClick={() => setCustomizing(open => !open)}>
             ⚙ {language === 'ar' ? 'تخصيص لوحة اليوم' : 'Customize dashboard'}
           </button>
@@ -176,6 +194,16 @@ export default function TodayPage({ language, onUnauthorized }) {
         <div className="dashboard-wellness-progress">
           {wellness.profile.calorie_goal && <Progress label={language === 'ar' ? 'السعرات' : 'Calories'} current={wellness.summary.calories} goal={wellness.profile.calorie_goal} unit="kcal" />}
           {wellness.profile.water_goal_ml && <Progress label={language === 'ar' ? 'الماء' : 'Water'} current={wellness.water_total_ml} goal={wellness.profile.water_goal_ml} unit="ml" />}
+        </div>
+        {waterError && <p className="notice error" role="alert">{waterError}</p>}
+        <div className="dashboard-wellness-actions">
+          <button className="button button-quiet" type="button" disabled={savingWater} onClick={logWater}>
+            {savingWater ? (language === 'ar' ? 'جارٍ التسجيل…' : 'Logging…')
+              : (language === 'ar' ? '＋ سجّل ٢٥٠ مل ماء' : '+ Log 250 ml water')}
+          </button>
+          <Link className="button button-quiet" to="/?view=wellness">
+            {language === 'ar' ? 'تفاصيل الغذاء والتمرين' : 'Food & exercise details'} →
+          </Link>
         </div>
       </section>}
       {widgets.includes('progress') && <section className="page-card gamification-card">

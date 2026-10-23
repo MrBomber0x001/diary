@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import { currentLocation, Link, navigate, useLocation } from './navigation.jsx';
 import { messages } from './i18n.js';
@@ -33,6 +33,39 @@ function resolveRoute(location) {
   return { page: url.searchParams.get('view') || 'today', date: url.searchParams.get('date') || '' };
 }
 
+function readExtensionCapture() {
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  const token = hash.get('capture');
+  if (!token) return null;
+  if (token.length > 16000 || !/^[A-Za-z0-9_-]+$/.test(token)) {
+    throw new Error('The extension capture link is invalid.');
+  }
+  const base64 = token.replace(/-/g, '+').replace(/_/g, '/');
+  const binary = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='));
+  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+  const capture = JSON.parse(new TextDecoder().decode(bytes));
+  const title = typeof capture.title === 'string' ? capture.title.trim() : '';
+  const url = typeof capture.url === 'string' ? capture.url.trim() : '';
+  const parsedUrl = new URL(url);
+  if (!title || title.length > 300 || url.length > 2048
+    || !['http:', 'https:'].includes(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password) {
+    throw new Error('The extension did not provide a valid page title and URL.');
+  }
+  return {
+    token,
+    article: {
+      title,
+      url,
+      description: typeof capture.description === 'string' ? capture.description.slice(0, 2000) : '',
+      excerpt: (typeof capture.excerpt === 'string' && capture.excerpt.trim()
+        ? capture.excerpt
+        : typeof capture.readableText === 'string' ? capture.readableText : '').slice(0, 5000),
+      review: '',
+      status: 'unread',
+    },
+  };
+}
+
 export default function App() {
   const location = useLocation();
   const route = useMemo(() => resolveRoute(location), [location]);
@@ -43,6 +76,8 @@ export default function App() {
   const [themeMode, setThemeMode] = useState(() => localStorage.getItem('personal-memo-theme') || 'system');
   const [themeError, setThemeError] = useState('');
   const [audioItem, setAudioItem] = useState(null);
+  const [extensionCapture, setExtensionCapture] = useState(null);
+  const captureInFlight = useRef('');
 
   const unauthorized = useCallback(() => {
     setUser(null);
@@ -89,6 +124,47 @@ export default function App() {
     });
     return () => { active = false; };
   }, [user?.id]);
+
+  const saveExtensionCapture = useCallback(async retry => {
+    let capture;
+    try {
+      capture = readExtensionCapture();
+      if (!capture) {
+        setExtensionCapture(null);
+        return;
+      }
+    } catch (failure) {
+      setExtensionCapture({ type: 'error', message: failure.message });
+      return;
+    }
+    if (!user || captureInFlight.current === capture.token) return;
+    captureInFlight.current = capture.token;
+    setExtensionCapture({ type: 'saving', title: capture.article.title, token: capture.token });
+    try {
+      await api('/articles', { method: 'POST', body: capture.article });
+      if (window.location.hash.includes(capture.token)) {
+        window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
+      }
+      setExtensionCapture({
+        type: 'success',
+        message: language === 'ar' ? 'تم حفظ الرابط في قائمة القراءة.' : 'Page saved to your reading list.',
+      });
+      captureInFlight.current = '';
+    } catch (failure) {
+      captureInFlight.current = '';
+      if (failure.status === 401) unauthorized();
+      setExtensionCapture({
+        type: 'error',
+        message: failure.message,
+        token: capture.token,
+        retry,
+      });
+    }
+  }, [language, unauthorized, user]);
+
+  useEffect(() => {
+    if (user) saveExtensionCapture(false);
+  }, [user?.id, saveExtensionCapture]);
 
   async function toggleTheme() {
     const nextMode = themeMode === 'dark' ? 'light' : 'dark';
@@ -141,16 +217,28 @@ export default function App() {
       <FocusSessionProvider userId={user.id} onUnauthorized={unauthorized}>
         <AppShell user={user} page={route.page} language={language} themeMode={themeMode} themeError={themeError} audioItem={audioItem}
           onAudioStop={() => setAudioItem(null)} onThemeToggle={toggleTheme} setLanguage={changeLanguage} onLogout={logout} onUnauthorized={unauthorized}>
+          {extensionCapture && <div className={`extension-capture-notice ${extensionCapture.type === 'error' ? 'error' : ''}`}
+            role={extensionCapture.type === 'error' ? 'alert' : 'status'}>
+            <span>{extensionCapture.type === 'saving'
+              ? (language === 'ar' ? `جارٍ حفظ «${extensionCapture.title}»…` : `Saving “${extensionCapture.title}”…`)
+              : extensionCapture.message}</span>
+            {extensionCapture.type === 'error' && extensionCapture.token && <button type="button" onClick={() => {
+              captureInFlight.current = '';
+              saveExtensionCapture(true);
+            }}>{language === 'ar' ? 'إعادة المحاولة' : 'Retry'}</button>}
+            {extensionCapture.type !== 'saving' && <button type="button" aria-label={language === 'ar' ? 'إغلاق' : 'Dismiss'}
+              onClick={() => setExtensionCapture(null)}>×</button>}
+          </div>}
           <Suspense fallback={<section className="page-card"><p>{messages[language].loading}</p></section>}>
             {content}
           </Suspense>
           {['notes', 'memories', 'bookmarks', 'snippets', 'daily-note'].includes(route.page) && <section className="page-card">
             <div className="record-actions">
-              <Link className="button button-quiet" to="/?view=notes">المقالات</Link>
-              <Link className="button button-quiet" to="/?view=memories">الذكريات</Link>
-              <Link className="button button-quiet" to="/?view=bookmarks">الروابط المحفوظة</Link>
-              <Link className="button button-quiet" to="/?view=daily-note">المذكرة اليومية</Link>
-              <Link className="button button-quiet" to="/?view=snippets">المقاطع البرمجية</Link>
+              <Link className="button button-quiet" to="/?view=notes">{language === 'ar' ? 'المقالات' : 'Articles'}</Link>
+              <Link className="button button-quiet" to="/?view=memories">{messages[language].memories}</Link>
+              <Link className="button button-quiet" to="/?view=bookmarks">{language === 'ar' ? 'الروابط المحفوظة' : 'Bookmarks'}</Link>
+              <Link className="button button-quiet" to="/?view=daily-note">{language === 'ar' ? 'المذكرة اليومية' : 'Daily note'}</Link>
+              <Link className="button button-quiet" to="/?view=snippets">{language === 'ar' ? 'المقاطع البرمجية' : 'Code snippets'}</Link>
             </div>
           </section>}
         </AppShell>

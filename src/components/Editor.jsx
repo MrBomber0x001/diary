@@ -1,6 +1,8 @@
+import { createPortal } from 'react-dom';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { messages } from '../i18n.js';
 import { api } from '../api.js';
+import CalmAudioControl from './CalmAudioControl.jsx';
 
 const LexicalTextEditor = lazy(() => import('./LexicalTextEditor.jsx'));
 
@@ -29,9 +31,12 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
   const [values, setValues] = useState(() => Object.fromEntries(fields.map(field => [field.key, initialValue(field, value)])));
   const [imageErrors, setImageErrors] = useState({});
   const [showMoreFields, setShowMoreFields] = useState(false);
+  const [calmMode, setCalmMode] = useState(false);
+  const [calmFontSize, setCalmFontSize] = useState(18);
   useEffect(() => {
     setValues(Object.fromEntries(fields.map(field => [field.key, initialValue(field, value)])));
     setShowMoreFields(false);
+    setCalmMode(false);
   }, [fields, value]);
   const t = messages[language];
 
@@ -116,12 +121,39 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
     ? fields.filter(field => quickFieldKeys.includes(field.key)).sort((first, second) => first.key === 'title' ? -1 : second.key === 'title' ? 1 : 0)
     : fields;
   const extraFields = quickCapture ? fields.filter(field => !quickFieldKeys.includes(field.key)) : [];
-  return (
-    <form className={`editor${quickCapture ? ' editor-quick-capture' : ''}${writingMode ? ' writing-editor' : ''}`} onSubmit={event => { event.preventDefault(); onSubmit(convertFields(fields, values)); }}
-      onKeyDown={event => { if ((quickCapture || writingMode) && (event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); event.currentTarget.requestSubmit(); } }}>
+  const form = (
+    <form className={`editor${quickCapture ? ' editor-quick-capture' : ''}${writingMode ? ' writing-editor' : ''}${calmMode ? ` calm-writing${writingFields.some(field => field.key === 'title') ? '' : ' calm-writing-titleless'}` : ''}`}
+      dir={language === 'ar' ? 'rtl' : 'ltr'}
+      onSubmit={event => { event.preventDefault(); onSubmit(convertFields(fields, values)); }}
+      onKeyDown={event => {
+        if (calmMode && event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          setCalmMode(false);
+        } else if ((quickCapture || writingMode) && (event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          event.preventDefault();
+          event.currentTarget.requestSubmit();
+        }
+      }}>
+      {writingMode && calmMode && <div className="calm-writing-bar">
+        <button className="calm-writing-exit" type="button" onClick={() => setCalmMode(false)}>
+          {language === 'ar' ? 'العودة' : 'Exit calm edition'}
+        </button>
+        <div className="calm-size-control" role="group" aria-label={language === 'ar' ? 'حجم الخط' : 'Text size'}>
+          <button type="button" aria-label={language === 'ar' ? 'تصغير الخط' : 'Decrease text size'}
+            disabled={calmFontSize <= 14} onClick={() => setCalmFontSize(size => Math.max(14, size - 2))}>A−</button>
+          <span>{calmFontSize}px</span>
+          <button type="button" aria-label={language === 'ar' ? 'تكبير الخط' : 'Increase text size'}
+            disabled={calmFontSize >= 28} onClick={() => setCalmFontSize(size => Math.min(28, size + 2))}>A+</button>
+        </div>
+        <CalmAudioControl language={language} />
+      </div>}
       {writingMode ? writingFields.map(field => field.key === 'title'
         ? <label className="writing-title-field wide" htmlFor={`field-${field.key}`} key={field.key}><span className="sr-only">{field.label}</span>{fieldInput(field)}</label>
-        : <label className="writing-body-field wide" htmlFor={`field-${field.key}`} key={field.key}><span className="sr-only">{field.label}</span>{fieldInput(field)}</label>)
+        : <label className="writing-body-field wide" htmlFor={`field-${field.key}`} key={field.key}
+          style={calmMode ? { '--calm-font-size': `${calmFontSize}px` } : undefined}>
+          <span className="sr-only">{field.label}</span>{fieldInput(field)}
+        </label>)
         : primaryFields.map(renderField)}
       {writingMode && writingExtraFields.length > 0 && <>
         <button className="editor-more-toggle writing-details-toggle" type="button" aria-expanded={showMoreFields} onClick={() => setShowMoreFields(current => !current)}>
@@ -139,8 +171,12 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
       </>}
       <div className={`editor-actions${writingMode ? ' writing-editor-actions' : ''}`}>
         <button className="button button-primary" type="submit">{submitLabel || t.submit}{(quickCapture || writingMode) && <span className="editor-shortcut">Ctrl ↵</span>}</button>
-        {showCancel && <button className="button button-quiet" type="button" onClick={onCancel}>{t.cancel}</button>}
+        {writingMode && !calmMode && <button className="calm-writing-launch" type="button" onClick={() => setCalmMode(true)}>
+          <span aria-hidden="true">◌</span>{language === 'ar' ? 'وضع الكتابة الهادئ' : 'Calm edition'}
+        </button>}
+        {showCancel && !calmMode && <button className="button button-quiet" type="button" onClick={onCancel}>{t.cancel}</button>}
       </div>
     </form>
   );
+  return calmMode ? createPortal(form, document.body) : form;
 }

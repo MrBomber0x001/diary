@@ -3,6 +3,7 @@ import { messages } from '../i18n.js';
 import { Link } from '../navigation.jsx';
 import NotificationsCenter from './NotificationsCenter.jsx';
 import QuickNoteWidget from './QuickNoteWidget.jsx';
+import GlobalSearch from './GlobalSearch.jsx';
 
 function PersistentAudioPlayer({ item, onStop, language }) {
   const playerRef = useRef(null);
@@ -27,20 +28,22 @@ function PersistentAudioPlayer({ item, onStop, language }) {
 }
 
 const navGroups = [
-  [['home', 'today', '⌂'], ['library', 'library', '▤'], ['tasks', 'tasks', '✓'], ['calendar', 'calendar', '▦'], ['timeline', 'timeline', '◷']],
-  [['planning', 'planning', '◎'], ['habits', 'habits', '✳'], ['notes', 'notes', '✎'], ['memories', 'memories', '♡'], ['learning', 'learning', '↗']],
-  [['finance', 'finance', '$'], ['clubs', 'clubs', '◉'], ['interviews', 'interviews', '◷'], ['gallery', 'gallery', '▧']],
-  [['wellness', 'wellness', '♡'], ['focus', 'focus', '◌'], ['quran', 'quran', '☾'], ['settings', 'settings', '⚙']],
+  ['navToday', [['home', 'today', '⌂'], ['library', 'library', '▤'], ['tasks', 'tasks', '✓'], ['calendar', 'calendar', '▦'], ['timeline', 'timeline', '◷']]],
+  ['navPersonal', [['planning', 'planning', '◎'], ['habits', 'habits', '✳'], ['notes', 'notes', '✎'], ['memories', 'memories', '♡'], ['learning', 'learning', '↗']]],
+  ['navActivities', [['finance', 'finance', '$'], ['clubs', 'clubs', '◉'], ['interviews', 'interviews', '◷'], ['gallery', 'gallery', '▧']]],
+  ['navWellbeing', [['wellness', 'wellness', '♡'], ['focus', 'focus', '◌'], ['quran', 'quran', '☾'], ['settings', 'settings', '⚙']]],
 ];
 
 export default function AppShell({ user, page, language, themeMode, themeError, audioItem, onAudioStop, onThemeToggle, setLanguage, onLogout, onUnauthorized, children }) {
   const t = messages[language];
   const current = page === 'item' ? 'library' : page;
+  const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
   return (
     <div className="app-shell">
       <header className="topbar">
         <Link className="brand" to="/?view=today"><span className="brand-mark">✦</span><strong>{t.app}</strong></Link>
         <div className="top-actions">
+          <GlobalSearch language={language} onUnauthorized={onUnauthorized} />
           <NotificationsCenter user={user} language={language} onUnauthorized={onUnauthorized} />
           <Link className="button button-quiet header-quran-link" to="/?view=quran" aria-label={language === 'ar' ? 'القرآن والصلاة' : 'Quran and prayer'}>
             <span aria-hidden="true">☾</span><span>{language === 'ar' ? 'القرآن والصلاة' : 'Quran & prayer'}</span>
@@ -59,8 +62,9 @@ export default function AppShell({ user, page, language, themeMode, themeError, 
       <PersistentAudioPlayer item={audioItem} onStop={onAudioStop} language={language} />
       <div className="app-layout">
         <nav className="workspace-nav" aria-label={language === 'ar' ? 'أقسام مساحة العمل' : 'Workspace'}>
-          {navGroups.map((group, index) => (
-            <div className="workspace-nav-group" key={index}>
+          {navGroups.map(([heading, group]) => (
+            <div className="workspace-nav-group" key={heading}>
+              <h2 className="workspace-nav-heading">{t[heading]}</h2>
               {group.map(([key, path, icon]) => (
                 <Link className={`workspace-nav-link ${current === path ? 'active' : ''}`} key={key} to={`/?view=${path}`}>
                   <span aria-hidden="true">{icon}</span><span className="workspace-nav-label">{t[key]}</span>
@@ -74,7 +78,7 @@ export default function AppShell({ user, page, language, themeMode, themeError, 
           {children}
         </main>
       </div>
-      <QuickNoteWidget language={language} onUnauthorized={onUnauthorized} />
+      <QuickNoteWidget language={language} onUnauthorized={onUnauthorized} open={quickCaptureOpen} onOpenChange={setQuickCaptureOpen} />
     </div>
   );
 }

@@ -46,6 +46,17 @@ function createManagementRouter({
       bookmarks: db.prepare(`SELECT id,title,url FROM bookmarks WHERE user_id=? AND deleted_at IS NULL
         AND (title LIKE ? OR url LIKE ? OR note LIKE ?) ORDER BY updated_at DESC LIMIT 8`)
         .all(userId, pattern, pattern, pattern),
+      memories: db.prepare(`SELECT id,title,memory_date,place,people,body FROM memories WHERE user_id=? AND deleted_at IS NULL
+        AND (title LIKE ? OR place LIKE ? OR people LIKE ? OR tags LIKE ? OR body LIKE ?)
+        ORDER BY memory_date DESC,id DESC LIMIT 8`).all(userId, pattern, pattern, pattern, pattern, pattern),
+      dailyNotes: db.prepare(`SELECT id,note_date,title,body FROM daily_notes WHERE user_id=?
+        AND (title LIKE ? OR body LIKE ?) ORDER BY note_date DESC LIMIT 8`).all(userId, pattern, pattern),
+      snippets: db.prepare(`SELECT id,title,language,description FROM code_snippets WHERE user_id=?
+        AND (title LIKE ? OR language LIKE ? OR description LIKE ? OR code LIKE ?) ORDER BY updated_at DESC LIMIT 8`)
+        .all(userId, pattern, pattern, pattern, pattern),
+      learning: db.prepare(`SELECT id,title,'topic' AS type FROM learning_topics WHERE user_id=? AND (title LIKE ? OR description LIKE ?)
+        UNION ALL SELECT n.id,n.title,'note' AS type FROM learning_notes n WHERE n.user_id=? AND (n.title LIKE ? OR n.body LIKE ?)
+        ORDER BY title COLLATE NOCASE LIMIT 8`).all(userId, pattern, pattern, userId, pattern, pattern),
     });
   });
 
