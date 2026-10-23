@@ -25,6 +25,13 @@ export const collections = {
     fields: [
       text('title', 'عنوان المهمة', { required: true }), notes(),
       date('due_date', 'تاريخ الاستحقاق'), text('due_time', 'الوقت', { type: 'time' }),
+      choice('priority', [
+        { value: 4, label: 'P4 · عادية' },
+        { value: 3, label: 'P3 · منخفضة' },
+        { value: 2, label: 'P2 · عالية' },
+        { value: 1, label: 'P1 · عاجلة' },
+      ], 'الأولوية'),
+      choice('project_id', [], 'المشروع'),
       choice('recurrence', ['none', 'daily', 'weekly', 'monthly', 'yearly']),
       text('completed', 'مكتملة', { type: 'checkbox' }),
     ],

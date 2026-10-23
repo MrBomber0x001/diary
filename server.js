@@ -157,6 +157,7 @@ db.exec(`
     due_date TEXT,
     due_time TEXT,
     recurrence TEXT NOT NULL DEFAULT 'none' CHECK (recurrence IN ('none','daily','weekly','monthly')),
+    priority INTEGER NOT NULL DEFAULT 4 CHECK (priority BETWEEN 1 AND 4),
     completed INTEGER NOT NULL DEFAULT 0 CHECK (completed IN (0,1)),
     deleted_at TEXT,
     source_todo_id INTEGER REFERENCES todos(id),
@@ -686,6 +687,9 @@ if (!db.prepare('PRAGMA table_info(focus_sessions)').all().some(column => column
 }
 if (!db.prepare('PRAGMA table_info(todos)').all().some(column => column.name === 'project_id')) {
   db.exec('ALTER TABLE todos ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL');
+}
+if (!db.prepare('PRAGMA table_info(todos)').all().some(column => column.name === 'priority')) {
+  db.exec('ALTER TABLE todos ADD COLUMN priority INTEGER NOT NULL DEFAULT 4 CHECK (priority BETWEEN 1 AND 4)');
 }
 if (!db.prepare('PRAGMA table_info(interview_rounds)').all().some(column => column.name === 'scheduled_start')) {
   db.exec('ALTER TABLE interview_rounds ADD COLUMN scheduled_start TEXT');
@@ -1387,6 +1391,7 @@ function validateTodo(body, userId) {
   const dueDate = text(body?.due_date);
   const dueTime = text(body?.due_time);
   const recurrence = text(body?.recurrence || 'none');
+  const priority = body?.priority === undefined || body?.priority === null || body?.priority === '' ? 4 : Number(body.priority);
   const completed = body?.completed === true || body?.completed === 'on' || body?.completed === 1;
   const projectId = body?.project_id === '' || body?.project_id == null ? null : Number(body.project_id);
   if (!title || title.length > 200 || notes.length > 2000) {
@@ -1395,6 +1400,7 @@ function validateTodo(body, userId) {
   if (!validDate(dueDate)) return { error: 'أدخل تاريخ استحقاق صحيحاً.' };
   if (dueTime && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dueTime)) return { error: 'أدخل وقتاً صحيحاً بصيغة ٢٤ ساعة.' };
   if (!['none', 'daily', 'weekly', 'monthly'].includes(recurrence)) return { error: 'اختر تكراراً صحيحاً للمهمة.' };
+  if (!Number.isInteger(priority) || priority < 1 || priority > 4) return { error: 'اختر أولوية صحيحة للمهمة.' };
   if ((dueTime || recurrence !== 'none') && !dueDate) return { error: 'أدخل تاريخ الاستحقاق لاستخدام الوقت أو التكرار.' };
   if (projectId !== null && (!Number.isSafeInteger(projectId)
     || !db.prepare("SELECT id FROM projects WHERE id=? AND user_id=? AND status<>'completed'").get(projectId, userId))) {
@@ -1407,6 +1413,7 @@ function validateTodo(body, userId) {
       due_date: dueDate || null,
       due_time: dueTime || null,
       recurrence,
+      priority,
       completed,
       project_id: projectId,
     },

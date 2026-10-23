@@ -759,6 +759,22 @@ h2 { margin: 26px 0 12px; font-size: 20px; }
 @keyframes app-dialog-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes app-dialog-rise-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .wellness-tools { display: grid; gap: 13px; padding: 17px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-raised); }
+.wellness-quick-meal { margin-bottom: 16px; }
+.wellness-quick-meal-form { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(125px, .45fr) auto; align-items: end; gap: 10px; }
+.wellness-quick-meal-form label { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.wellness-quick-meal-form input, .wellness-quick-meal-form select { width: 100%; min-height: 42px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; }
+.wellness-quick-meal-submit { min-height: 42px; white-space: nowrap; }
+.wellness-meal-details-toggle { justify-self: start; padding: 5px 0; border: 0; background: transparent; color: var(--brand-dark); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.wellness-quick-meal-details { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.wellness-quick-meal-details p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 11px; }
+.wellness-recent-meals { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.wellness-recent-meals > span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.wellness-recent-meals > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.wellness-recent-meal { display: grid; min-width: 130px; gap: 2px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); cursor: pointer; text-align: start; transition: border-color .15s, background .15s, transform .15s; }
+.wellness-recent-meal:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--brand); background: var(--brand-soft); }
+.wellness-recent-meal:disabled { cursor: wait; opacity: .65; }
+.wellness-recent-meal strong { font-size: 12px; }
+.wellness-recent-meal small { color: var(--muted); font-size: 10px; }
 .wellness-tracking-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); align-items: start; gap: 16px; }
 .wellness-tool-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .wellness-tool-heading h2 { padding: 0; margin: 0; border: 0; font-size: 16px; }
@@ -817,6 +833,10 @@ h2 { margin: 26px 0 12px; font-size: 20px; }
   .dashboard-habits-content { grid-template-columns: minmax(0, 1fr); }
   .dashboard-habit-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .wellness-page .page-heading, .wellness-list-heading, .wellness-record, .wellness-tool-heading { align-items: stretch; flex-direction: column; }
+  .wellness-quick-meal-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .wellness-quick-meal-name { grid-column: 1 / -1; }
+  .wellness-quick-meal-submit { grid-column: 1 / -1; }
+  .wellness-quick-meal-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .wellness-tracking-grid { grid-template-columns: minmax(0, 1fr); }
   .wellness-week { grid-template-columns: minmax(0, 1fr); }
   .wellness-weight-form { grid-template-columns: minmax(0, 1fr); }
@@ -1118,7 +1138,10 @@ h2 { margin: 26px 0 12px; font-size: 20px; }
 .task-overview-overdue strong { color: #a64f57; }
 .task-quick-add { display: flex; align-items: center; gap: 10px; padding: 9px 10px; margin-bottom: 17px; border: 1px solid #dce7e1; border-radius: 14px; background: #f8fbf9; }
 .task-quick-add > span { display: grid; width: 31px; height: 31px; flex: none; place-items: center; border-radius: 10px; background: var(--brand-soft); color: var(--brand); font-size: 19px; }
-.task-quick-add input { min-width: 0; flex: 1; border: 0 !important; background: transparent !important; box-shadow: none !important; }
+.task-quick-add-main { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.task-quick-add-main input { min-width: 0; width: 100%; border: 0 !important; background: transparent !important; box-shadow: none !important; }
+.task-quick-add-main small { padding-inline-start: 2px; color: var(--muted); font-size: 10px; }
+.task-quick-add select { min-height: 36px; max-width: 145px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; }
 .task-quick-add .button { min-height: 36px; }
 .task-card { grid-template-columns: 26px minmax(0, 1fr); align-items: start; gap: 13px; }
 .task-card-content { min-width: 0; display: grid; gap: 2px; }
@@ -1126,6 +1149,11 @@ h2 { margin: 26px 0 12px; font-size: 20px; }
 .task-meta { align-items: center; }
 .task-meta span { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 8px; border-radius: 8px; background: #f0f4f1; color: #62736a; font-size: 11px; }
 .task-meta .task-due-overdue { background: #fff0f1; color: #a74e56; }
+.task-meta .task-priority { font-weight: 800; }
+.task-meta .task-priority-1 { background: #fff0f1; color: #a43f4a; }
+.task-meta .task-priority-2 { background: #fff5e5; color: #92621a; }
+.task-meta .task-priority-3 { background: #eef3fb; color: #4d6791; }
+.task-meta .task-priority-4 { background: #f0f4f1; color: #62736a; }
 .task-card .record-actions { justify-content: flex-start; margin-top: 8px; }
 .task-grid { grid-template-columns: 1fr; }
 .habit-grid, .routine-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 315px), 1fr)); gap: 14px; align-items: stretch; }
@@ -1218,8 +1246,10 @@ h2 { margin: 26px 0 12px; font-size: 20px; }
   .notification-popover { position: fixed; inset-inline: 12px; inset-block-start: 68px; width: auto; max-height: calc(100vh - 82px); }
   .top-actions .notification-trigger { width: 36px; height: 36px; }
   .task-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .task-quick-add { gap: 6px; }
-  .task-quick-add .button { padding-inline: 9px; }
+  .task-quick-add { flex-wrap: wrap; gap: 6px; }
+  .task-quick-add-main { flex-basis: calc(100% - 50px); }
+  .task-quick-add select { max-width: none; flex: 1; }
+  .task-quick-add .button { flex: 1; padding-inline: 9px; }
   .habit-grid, .routine-grid { grid-template-columns: 1fr; }
   .habit-card { padding: 14px; }
 }
@@ -1387,6 +1417,10 @@ h2 { margin: 26px 0 12px; font-size: 20px; }
 :root[data-theme="dark"] .finance-subscription-status.paused { background: #3b3426; color: #e0c184; }
 :root[data-theme="dark"] .finance-subscription-status.cancelled { background: #34302f; color: #b9aaa7; }
 :root[data-theme="dark"] .task-overview-card, :root[data-theme="dark"] .task-quick-add { border-color: var(--line); background: #1a2523; }
+:root[data-theme="dark"] .wellness-recent-meal { border-color: var(--line); background: var(--surface); color: var(--ink); }
+:root[data-theme="dark"] .task-meta .task-priority-1 { background: #3c2529; color: #f0a3a8; }
+:root[data-theme="dark"] .task-meta .task-priority-2 { background: #403525; color: #e8c783; }
+:root[data-theme="dark"] .task-meta .task-priority-3 { background: #283444; color: #a7c1e5; }
 :root[data-theme="dark"] .task-overview-overdue { background: #332528; }
 :root[data-theme="dark"] .habit-card.habit-completed { border-color: #365743; background: linear-gradient(155deg, #1e3026, #1a2523); }
 :root[data-theme="dark"] .habit-day i { border-color: var(--line); background: #17211f; }

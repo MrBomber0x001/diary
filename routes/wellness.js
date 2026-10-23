@@ -97,6 +97,11 @@ function createWellnessRouter({ db, text, now, localToday }) {
     const userId = req.user.id;
     const meals = db.prepare(`SELECT id,entry_date,meal_type,name,calories,protein_g,carbs_g,fat_g,notes,created_at,updated_at
       FROM wellness_meals WHERE user_id=? AND entry_date=? ORDER BY id DESC`).all(userId, date);
+    const recentMeals = db.prepare(`SELECT meal_type,name,calories,protein_g,carbs_g,fat_g,notes,entry_date AS last_logged
+      FROM wellness_meals m WHERE m.user_id=? AND m.id=(SELECT MAX(recent.id) FROM wellness_meals recent
+        WHERE recent.user_id=m.user_id AND recent.meal_type=m.meal_type AND recent.name=m.name)
+      ORDER BY entry_date DESC,id DESC LIMIT 8`)
+      .all(userId);
     const workouts = db.prepare(`SELECT id,entry_date,exercise,sets,reps,weight_kg,duration_minutes,notes,created_at,updated_at
       FROM wellness_workouts WHERE user_id=? AND entry_date=? ORDER BY id DESC`).all(userId, date);
     const mealTotals = db.prepare(`SELECT COALESCE(SUM(calories),0) AS calories,COALESCE(SUM(protein_g),0) AS protein_g,
@@ -132,7 +137,7 @@ function createWellnessRouter({ db, text, now, localToday }) {
         (SELECT COALESCE(SUM(duration_minutes),0) FROM wellness_workouts WHERE user_id=? AND entry_date=days.day) AS duration_minutes
       FROM days ORDER BY days.day`).all(dateAfter(date, -6), userId, userId, userId, userId);
     res.json({
-      date, meals, workouts, summary: { ...mealTotals, ...workoutTotals }, week: { ...week, from, through: date },
+      date, meals, recent_meals: recentMeals, workouts, summary: { ...mealTotals, ...workoutTotals }, week: { ...week, from, through: date },
       profile, water, water_total_ml: water.reduce((total, entry) => total + entry.amount_ml, 0),
       weight, recent_weight: recentWeight, templates, trends,
     });

@@ -20,6 +20,9 @@ export default function WellnessPage({ language, onUnauthorized }) {
   const [showAllWater, setShowAllWater] = useState(false);
   const [weightInput, setWeightInput] = useState('');
   const [goals, setGoals] = useState(null);
+  const [quickMeal, setQuickMeal] = useState({ meal_type: 'breakfast', name: '', calories: '', protein_g: '', carbs_g: '', fat_g: '', notes: '' });
+  const [showMealDetails, setShowMealDetails] = useState(false);
+  const [quickMealSaving, setQuickMealSaving] = useState(false);
   const isArabic = language === 'ar';
   const t = messages[language];
 
@@ -75,6 +78,56 @@ export default function WellnessPage({ language, onUnauthorized }) {
       else setError(failure.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveQuickMeal(event) {
+    event.preventDefault();
+    if (!quickMeal.name.trim() || quickMealSaving) return;
+    setQuickMealSaving(true);
+    setError('');
+    setSaved('');
+    try {
+      await api('/wellness/meals', {
+        method: 'POST',
+        body: {
+          ...quickMeal,
+          name: quickMeal.name.trim(),
+          entry_date: date,
+          calories: quickMeal.calories || 0,
+          protein_g: quickMeal.protein_g || 0,
+          carbs_g: quickMeal.carbs_g || 0,
+          fat_g: quickMeal.fat_g || 0,
+        },
+      });
+      setQuickMeal(current => ({ ...current, name: '', calories: '', protein_g: '', carbs_g: '', fat_g: '', notes: '' }));
+      setSaved(isArabic ? 'تم تسجيل الوجبة.' : 'Meal logged.');
+      await load();
+    } catch (failure) {
+      if (failure.status === 401) onUnauthorized();
+      else setError(failure.message);
+    } finally {
+      setQuickMealSaving(false);
+    }
+  }
+
+  async function logRecentMeal(meal) {
+    if (quickMealSaving) return;
+    setQuickMealSaving(true);
+    setError('');
+    setSaved('');
+    try {
+      await api('/wellness/meals', {
+        method: 'POST',
+        body: { ...meal, entry_date: date },
+      });
+      setSaved(isArabic ? 'تم تسجيل الوجبة السابقة.' : 'Previous meal logged.');
+      await load();
+    } catch (failure) {
+      if (failure.status === 401) onUnauthorized();
+      else setError(failure.message);
+    } finally {
+      setQuickMealSaving(false);
     }
   }
 
@@ -217,6 +270,44 @@ export default function WellnessPage({ language, onUnauthorized }) {
 
     {error && <p className="notice error" role="alert">{error}</p>}
     {saved && <p className="notice" role="status">{saved}</p>}
+
+    {section === 'diet' && <section className="wellness-tools wellness-quick-meal">
+      <div className="wellness-tool-heading"><div>
+        <h2>{isArabic ? 'تسجيل سريع' : 'Quick log'}</h2>
+        <p>{isArabic ? 'اكتب اسم الوجبة فقط، وأضف تفاصيل التغذية إذا رغبت.' : 'Just name your meal. Add nutrition details only if you want.'}</p>
+      </div></div>
+      <form className="wellness-quick-meal-form" onSubmit={saveQuickMeal}>
+        <label className="wellness-quick-meal-name">{isArabic ? 'ماذا أكلت؟' : 'What did you eat?'}
+          <input autoComplete="off" maxLength="160" value={quickMeal.name} onChange={event => setQuickMeal(current => ({ ...current, name: event.target.value }))}
+            placeholder={isArabic ? 'مثال: شوفان وموز' : 'e.g. Oatmeal and banana'} required />
+        </label>
+        <label>{isArabic ? 'الوجبة' : 'Meal'}
+          <select value={quickMeal.meal_type} onChange={event => setQuickMeal(current => ({ ...current, meal_type: event.target.value }))}>
+            {['breakfast', 'lunch', 'dinner', 'snack'].map(type => <option value={type} key={type}>{mealTypeName(type)}</option>)}
+          </select>
+        </label>
+        <button className="button button-primary wellness-quick-meal-submit" type="submit" disabled={quickMealSaving || !quickMeal.name.trim()}>
+          {quickMealSaving ? (isArabic ? 'جارٍ التسجيل…' : 'Logging…') : (isArabic ? 'تسجيل الوجبة' : 'Log meal')}
+        </button>
+        <button className="wellness-meal-details-toggle" type="button" aria-expanded={showMealDetails} onClick={() => setShowMealDetails(value => !value)}>
+          {showMealDetails ? '−' : '+'} {showMealDetails ? (isArabic ? 'إخفاء التفاصيل' : 'Hide details') : (isArabic ? 'إضافة السعرات والمغذيات (اختياري)' : 'Add calories and macros (optional)')}
+        </button>
+        {showMealDetails && <div className="wellness-quick-meal-details">
+          <label>{isArabic ? 'السعرات' : 'Calories'}<input type="number" min="0" max="20000" step="1" value={quickMeal.calories} onChange={event => setQuickMeal(current => ({ ...current, calories: event.target.value }))} /></label>
+          <label>{isArabic ? 'البروتين (غ)' : 'Protein (g)'}<input type="number" min="0" max="1000" step="0.1" value={quickMeal.protein_g} onChange={event => setQuickMeal(current => ({ ...current, protein_g: event.target.value }))} /></label>
+          <label>{isArabic ? 'الكربوهيدرات (غ)' : 'Carbs (g)'}<input type="number" min="0" max="2000" step="0.1" value={quickMeal.carbs_g} onChange={event => setQuickMeal(current => ({ ...current, carbs_g: event.target.value }))} /></label>
+          <label>{isArabic ? 'الدهون (غ)' : 'Fat (g)'}<input type="number" min="0" max="1000" step="0.1" value={quickMeal.fat_g} onChange={event => setQuickMeal(current => ({ ...current, fat_g: event.target.value }))} /></label>
+          <p>{isArabic ? 'اتركها فارغة إذا لم تكن تعرف القيم؛ لن نقدّرها نيابةً عنك.' : 'Leave values blank if you do not know them; the app will not guess.'}</p>
+        </div>}
+      </form>
+      {data.recent_meals.length > 0 && <div className="wellness-recent-meals">
+        <span>{isArabic ? 'سجّلتها من قبل · اضغط لإعادتها' : 'Logged before · tap to log again'}</span>
+        <div>{data.recent_meals.map(meal => <button className="wellness-recent-meal" type="button" key={`${meal.meal_type}-${meal.name}`}
+          onClick={() => logRecentMeal(meal)} disabled={quickMealSaving}>
+          <strong>{meal.name}</strong><small>{mealTypeName(meal.meal_type)}{meal.calories ? ` · ${number(meal.calories)} kcal` : ''}</small>
+        </button>)}</div>
+      </div>}
+    </section>}
 
     {section === 'diet' ? <>
       <div className="metric-grid wellness-metrics">

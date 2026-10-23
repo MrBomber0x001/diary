@@ -24,6 +24,57 @@ function bookmarkHostname(url) {
   }
 }
 
+const quickDateTokens = [
+  ['tomorrow', 'tomorrow'],
+  ['today', 'today'],
+  ['غداً', 'tomorrow'], ['غدا', 'tomorrow'], ['بكرة', 'tomorrow'], ['بكره', 'tomorrow'],
+  ['اليوم', 'today'],
+  ['sunday', 'weekday:0'], ['sun', 'weekday:0'], ['الأحد', 'weekday:0'], ['الاحد', 'weekday:0'],
+  ['monday', 'weekday:1'], ['mon', 'weekday:1'], ['الاثنين', 'weekday:1'], ['الإثنين', 'weekday:1'],
+  ['tuesday', 'weekday:2'], ['tue', 'weekday:2'], ['الثلاثاء', 'weekday:2'],
+  ['wednesday', 'weekday:3'], ['wed', 'weekday:3'], ['الأربعاء', 'weekday:3'], ['الاربعاء', 'weekday:3'],
+  ['thursday', 'weekday:4'], ['thu', 'weekday:4'], ['الخميس', 'weekday:4'],
+  ['friday', 'weekday:5'], ['fri', 'weekday:5'], ['الجمعة', 'weekday:5'],
+  ['saturday', 'weekday:6'], ['sat', 'weekday:6'], ['السبت', 'weekday:6'],
+];
+
+function parseQuickTask(value, fallbackPriority) {
+  let title = value.trim();
+  const priorityMatch = title.match(/(?:^|\s)p([1-4])(?=$|\s)/i);
+  const priority = priorityMatch ? Number(priorityMatch[1]) : Number(fallbackPriority || 4);
+  if (priorityMatch) title = title.replace(priorityMatch[0], ' ').trim();
+
+  let dueDate = null;
+  const isoDate = title.match(/(?:^|\s)(\d{4}-\d{2}-\d{2})(?=$|\s)/);
+  if (isoDate) {
+    const parsedDate = new Date(`${isoDate[1]}T00:00:00Z`);
+    if (Number.isFinite(parsedDate.getTime()) && parsedDate.toISOString().slice(0, 10) === isoDate[1]) {
+      dueDate = isoDate[1];
+      title = title.replace(isoDate[0], ' ').trim();
+    }
+  }
+
+  if (!dueDate) {
+    for (const [token, kind] of quickDateTokens) {
+      const matcher = new RegExp(`(?:^|\\s)${token}(?=$|\\s)`, 'i');
+      const match = title.match(matcher);
+      if (!match) continue;
+      const next = new Date();
+      next.setHours(12, 0, 0, 0);
+      if (kind === 'tomorrow') next.setDate(next.getDate() + 1);
+      else if (kind.startsWith('weekday:')) {
+        const targetDay = Number(kind.slice('weekday:'.length));
+        next.setDate(next.getDate() + ((targetDay - next.getDay() + 7) % 7 || 7));
+      }
+      dueDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+      title = title.replace(match[0], ' ').trim();
+      break;
+    }
+  }
+
+  return { title: title.replace(/\s+/g, ' '), dueDate, priority };
+}
+
 export default function CollectionPage({ config, language, onUnauthorized, query = '' }) {
   const { confirm } = useAppDialog();
   const [rows, setRows] = useState([]);
@@ -45,11 +96,22 @@ export default function CollectionPage({ config, language, onUnauthorized, query
   const [readingMeta, setReadingMeta] = useState({ total: 0, page: 1, pageSize: 25, pageCount: 0 });
   const [bookmarkFolder, setBookmarkFolder] = useState('all');
   const [quickTask, setQuickTask] = useState('');
+  const [quickPriority, setQuickPriority] = useState(4);
+  const [quickProject, setQuickProject] = useState('');
+  const [taskProjects, setTaskProjects] = useState([]);
   const [expandedRoutines, setExpandedRoutines] = useState({});
   const [copiedSnippetId, setCopiedSnippetId] = useState(null);
   const t = messages[language];
   const endpoint = typeof config.endpoint === 'function' ? config.endpoint() : config.endpoint;
   const writeEndpoint = config.writeEndpoint || (typeof config.endpoint === 'string' ? config.endpoint : null);
+  const editorFields = useMemo(() => config.viewType === 'tasks'
+    ? config.fields.map(field => field.key === 'project_id'
+      ? { ...field, options: [
+        { value: '', label: language === 'ar' ? 'الوارد' : 'Inbox' },
+        ...taskProjects.map(project => ({ value: project.id, label: project.title })),
+      ] }
+      : field)
+    : config.fields, [config, language, taskProjects]);
 
   useEffect(() => {
     if (config.viewType !== 'reading') return undefined;
@@ -73,6 +135,10 @@ export default function CollectionPage({ config, language, onUnauthorized, query
         ? `${endpoint}?page=${page}&pageSize=25&q=${encodeURIComponent(readingQuery)}`
         : endpoint;
       const result = await api(requestEndpoint);
+      if (config.viewType === 'tasks') {
+        const projects = await api('/projects');
+        setTaskProjects(projects.filter(project => project.status === 'active'));
+      }
       if (config.viewType === 'reading' && !Array.isArray(result)) {
         setRows(result.items);
         setReadingMeta({ total: result.total, page: result.page, pageSize: result.pageSize, pageCount: result.pageCount });
@@ -229,12 +295,20 @@ export default function CollectionPage({ config, language, onUnauthorized, query
 
   async function addQuickTask(event) {
     event.preventDefault();
-    const title = quickTask.trim();
+    const parsed = parseQuickTask(quickTask, quickPriority);
+    const title = parsed.title;
     if (!title) return;
     try {
-      const row = await api(writeEndpoint, { method: 'POST', body: config.prepare({ title }) });
-      setRows(current => [row, ...current]);
+      await api(writeEndpoint, { method: 'POST', body: config.prepare({
+        title,
+        due_date: parsed.dueDate,
+        priority: parsed.priority,
+        project_id: quickProject || null,
+      }) });
       setQuickTask('');
+      setQuickPriority(4);
+      setQuickProject('');
+      await load();
     } catch (failure) {
       if (failure.status === 401) onUnauthorized();
       else setError(failure.message);
@@ -267,6 +341,7 @@ export default function CollectionPage({ config, language, onUnauthorized, query
         {row.notes && <p className="task-notes" dir="auto">{row.notes}</p>}
         <div className="task-meta">
           {row.due_date && <span className={overdue ? 'task-due-overdue' : ''}>◷ {row.due_date}{row.due_time ? ` · ${row.due_time}` : ''}</span>}
+          <span className={`task-priority task-priority-${row.priority || 4}`}>P{row.priority || 4}</span>
           {row.project_title && <span>▧ {row.project_title}</span>}
           {row.recurrence && row.recurrence !== 'none' && <span>↻ {({
             daily: language === 'ar' ? 'يومي' : 'Daily',
@@ -476,8 +551,18 @@ export default function CollectionPage({ config, language, onUnauthorized, query
       </div>}
       {config.viewType === 'tasks' && <form className="task-quick-add" onSubmit={addQuickTask}>
         <span aria-hidden="true">＋</span><label className="sr-only" htmlFor="quick-task-title">{language === 'ar' ? 'مهمة سريعة' : 'Quick task'}</label>
-        <input id="quick-task-title" dir="auto" value={quickTask} onChange={event => setQuickTask(event.target.value)} placeholder={language === 'ar' ? 'اكتب مهمة واضغط Enter…' : 'Add a task and press Enter…'} />
-        <button className="button button-primary" type="submit" disabled={!quickTask.trim()}>{language === 'ar' ? 'إضافة' : 'Add'}</button>
+        <div className="task-quick-add-main">
+          <input id="quick-task-title" dir="auto" value={quickTask} onChange={event => setQuickTask(event.target.value)} placeholder={language === 'ar' ? 'اتصل بالطبيب غداً p1…' : 'Call the doctor tomorrow p1…'} />
+          <small>{language === 'ar' ? 'التاريخ والأولوية تُفهم من النص: اليوم، غداً، الاثنين، p1–p4' : 'Understands today, tomorrow, weekdays, and p1–p4'}</small>
+        </div>
+        <select aria-label={language === 'ar' ? 'أولوية المهمة' : 'Task priority'} value={quickPriority} onChange={event => setQuickPriority(Number(event.target.value))}>
+          {[1, 2, 3, 4].map(priority => <option value={priority} key={priority}>{language === 'ar' ? `P${priority} · ${['عاجلة', 'عالية', 'منخفضة', 'عادية'][priority - 1]}` : `P${priority} · ${['Urgent', 'High', 'Low', 'Normal'][priority - 1]}`}</option>)}
+        </select>
+        <select aria-label={language === 'ar' ? 'مشروع المهمة' : 'Task project'} value={quickProject} onChange={event => setQuickProject(event.target.value)}>
+          <option value="">{language === 'ar' ? 'الوارد' : 'Inbox'}</option>
+          {taskProjects.map(project => <option value={project.id} key={project.id}>{project.title}</option>)}
+        </select>
+        <button className="button button-primary" type="submit" disabled={!parseQuickTask(quickTask, quickPriority).title}>{language === 'ar' ? 'إضافة' : 'Add task'}</button>
       </form>}
       {editing !== null && (config.viewType === 'library' || config.viewType === 'reading') && !editing.id && <section className="collection-inline-editor">
         <header className="collection-inline-heading">
@@ -493,7 +578,7 @@ export default function CollectionPage({ config, language, onUnauthorized, query
           >
             <Editor fields={config.fields} value={editing} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} />
           </EditorDialog>}
-      {editing !== null && config.viewType !== 'library' && config.viewType !== 'reading' && config.viewType !== 'snippets' && <Editor fields={config.fields} value={editing} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} />}
+      {editing !== null && config.viewType !== 'library' && config.viewType !== 'reading' && config.viewType !== 'snippets' && <Editor fields={editorFields} value={editing} language={language} onSubmit={save} onCancel={() => setEditing(null)} onUnauthorized={onUnauthorized} />}
       {config.viewType === 'library' && <div className="library-toolbar">
         <div className="library-filter-group" role="group" aria-label={language === 'ar' ? 'تصفية حسب النوع' : 'Filter by type'}>
           {[['all', language === 'ar' ? 'الكل' : 'All'], ['book', language === 'ar' ? 'كتب' : 'Books'], ['movie', language === 'ar' ? 'أفلام' : 'Movies'], ['game', language === 'ar' ? 'ألعاب' : 'Games'], ['memo', language === 'ar' ? 'مذكرات' : 'Notes']].map(([kind, label]) =>
