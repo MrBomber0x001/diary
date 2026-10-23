@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { messages } from '../i18n.js';
-import MarkdownContent from './MarkdownContent.jsx';
 import { api } from '../api.js';
+
+const LexicalTextEditor = lazy(() => import('./LexicalTextEditor.jsx'));
 
 function initialValue(field, source = {}) {
   const firstOption = field.type === 'select' && field.options?.length
@@ -26,8 +27,6 @@ export function convertFields(fields, values) {
 
 export default function Editor({ fields, value, language, onSubmit, onCancel, onUnauthorized, submitLabel, showCancel = true, quickCapture = false }) {
   const [values, setValues] = useState(() => Object.fromEntries(fields.map(field => [field.key, initialValue(field, value)])));
-  const [preview, setPreview] = useState({});
-  const [imageUploads, setImageUploads] = useState({});
   const [imageErrors, setImageErrors] = useState({});
   const [showMoreFields, setShowMoreFields] = useState(false);
   useEffect(() => {
@@ -35,21 +34,6 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
     setShowMoreFields(false);
   }, [fields, value]);
   const t = messages[language];
-
-  function insertMarkdown(field, before, after = '') {
-    const input = document.getElementById(`field-${field.key}`);
-    const start = input?.selectionStart ?? String(values[field.key] || '').length;
-    const end = input?.selectionEnd ?? start;
-    const current = String(values[field.key] || '');
-    const selected = current.slice(start, end) || (language === 'ar' ? 'نص' : 'text');
-    const replacement = `${before}${selected}${after}`;
-    const updated = `${current.slice(0, start)}${replacement}${current.slice(end)}`;
-    setValues(previous => ({ ...previous, [field.key]: updated }));
-    requestAnimationFrame(() => {
-      input?.focus();
-      input?.setSelectionRange(start + before.length, start + before.length + selected.length);
-    });
-  }
 
   async function uploadImage(field, file) {
     const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -60,7 +44,6 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
       return;
     }
     setImageErrors(current => ({ ...current, [field.key]: '' }));
-    setImageUploads(current => ({ ...current, [field.key]: true }));
     try {
       const image = await api('/gallery', {
         method: 'POST',
@@ -71,25 +54,13 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
           'X-Image-Caption': encodeURIComponent(file.name.slice(0, 200)),
         },
       });
-      const textarea = document.getElementById(`field-${field.key}`);
-      const current = String(values[field.key] || '');
-      const start = textarea?.selectionStart ?? current.length;
-      const end = textarea?.selectionEnd ?? start;
-      const markdown = `![${file.name.replace(/[\[\]]/g, '')}](${image.url})`;
-      const updated = `${current.slice(0, start)}${markdown}${current.slice(end)}`;
-      setValues(previous => ({ ...previous, [field.key]: updated }));
-      requestAnimationFrame(() => {
-        textarea?.focus();
-        textarea?.setSelectionRange(start + markdown.length, start + markdown.length);
-      });
+      return `![${file.name.replace(/[\[\]]/g, '')}](${image.url})`;
     } catch (failure) {
       if (failure.status === 401) {
         onUnauthorized?.();
         setImageErrors(current => ({ ...current, [field.key]: language === 'ar' ? 'انتهت الجلسة. سجّل الدخول ثم حاول مجدداً.' : 'Your session expired. Sign in and try again.' }));
       }
       else setImageErrors(current => ({ ...current, [field.key]: failure.message }));
-    } finally {
-      setImageUploads(current => ({ ...current, [field.key]: false }));
     }
   }
 
@@ -111,30 +82,15 @@ export default function Editor({ fields, value, language, onSubmit, onCancel, on
     if (field.type === 'textarea') {
       const markdown = field.key !== 'code';
       return <div className="markdown-editor">
-        {markdown && <div className="markdown-toolbar" aria-label={language === 'ar' ? 'تنسيق Markdown' : 'Markdown formatting'}>
-          <button type="button" title="Heading" onClick={() => insertMarkdown(field, '## ', '')}>H</button>
-          <button type="button" title="Bold" onClick={() => insertMarkdown(field, '**', '**')}><strong>B</strong></button>
-          <button type="button" title="Italic" onClick={() => insertMarkdown(field, '*', '*')}><em>I</em></button>
-          <button type="button" title="Quote" onClick={() => insertMarkdown(field, '> ', '')}>❞</button>
-          <button type="button" title="Bullet list" onClick={() => insertMarkdown(field, '- ', '')}>•</button>
-          <button type="button" title="Link" onClick={() => insertMarkdown(field, '[', '](https://)')}>↗</button>
-          <button type="button" title="Image" onClick={() => insertMarkdown(field, '![', '](https://image-url)')}>▧</button>
-          <button type="button" title={language === 'ar' ? 'رفع صورة' : 'Upload image'} disabled={imageUploads[field.key]} onClick={() => document.getElementById(`image-${field.key}`)?.click()}>
-            {imageUploads[field.key] ? '…' : '⬆'}
-          </button>
-          <input id={`image-${field.key}`} className="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif"
-            onChange={event => { const file = event.target.files?.[0]; if (file) uploadImage(field, file); event.target.value = ''; }} />
-          <button type="button" className="markdown-preview-toggle" aria-label={preview[field.key] ? (language === 'ar' ? 'العودة للتحرير' : 'Return to editing') : (language === 'ar' ? 'معاينة' : 'Preview')}
-            title={preview[field.key] ? (language === 'ar' ? 'العودة للتحرير' : 'Return to editing') : (language === 'ar' ? 'معاينة' : 'Preview')}
-            onClick={() => setPreview(current => ({ ...current, [field.key]: !current[field.key] }))}>
-            <span aria-hidden="true">{preview[field.key] ? '✎' : '◉'}</span>
-          </button>
-        </div>}
-        {preview[field.key] && markdown
-          ? <div className="markdown-editor-preview"><MarkdownContent>{values[field.key]}</MarkdownContent></div>
-          : <textarea {...common} dir={field.key === 'code' ? 'ltr' : 'auto'} rows={field.key === 'code' ? 9 : 5}
-            onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
-            onDrop={event => { const file = [...event.dataTransfer.files].find(candidate => candidate.type.startsWith('image/')); if (file) { event.preventDefault(); uploadImage(field, file); } }} />}
+        <Suspense fallback={<textarea {...common} dir={field.key === 'code' ? 'ltr' : 'auto'} rows={field.key === 'code' ? 9 : 5} />}>
+          <LexicalTextEditor id={`field-${field.key}`} value={String(values[field.key] || '')}
+            onChange={next => setValues(current => ({ ...current, [field.key]: next }))}
+            language={language} code={!markdown}
+            placeholder={field.label}
+            onImageUpload={markdown ? file => uploadImage(field, file) : undefined}
+            onImageError={message => setImageErrors(current => ({ ...current, [field.key]: message }))}
+            autoFocus={quickCapture && field.key === 'title'} />
+        </Suspense>
         {imageErrors[field.key] && <span className="image-upload-error" role="alert">{imageErrors[field.key]}</span>}
         {!imageErrors[field.key] && field.key !== 'code' && <span className="markdown-hint">{language === 'ar' ? 'يمكنك إسقاط صورة هنا أو رفعها من شريط الأدوات.' : 'Drop an image here or upload it from the toolbar.'}</span>}
       </div>;

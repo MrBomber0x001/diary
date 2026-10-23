@@ -1237,6 +1237,39 @@ test('accounts, library search, recurring tasks, undo, and full media backup res
   assert.equal(db.pragma('integrity_check')[0].integrity_check, 'ok');
 });
 
+test('wellness meals and workouts are validated, summarized, editable, and private to each account', async () => {
+  const wellnessCookie = await createAccount('wellness_owner', 'wellness-owner-password-1234');
+  const otherCookie = await createAccount('wellness_guest', 'wellness-guest-password-1234');
+  const meal = await jsonRequest('/api/wellness/meals', 'POST', {
+    entry_date: '2025-04-12', meal_type: 'lunch', name: 'Rice and beans', calories: 620,
+    protein_g: 24.5, carbs_g: 90, fat_g: 12, notes: 'After training',
+  }, wellnessCookie);
+  assert.equal(meal.response.status, 201);
+  assert.equal(meal.result.calories, 620);
+  const workout = await jsonRequest('/api/wellness/workouts', 'POST', {
+    entry_date: '2025-04-12', exercise: 'Squat', sets: 4, reps: 8, weight_kg: 60, duration_minutes: 25,
+  }, wellnessCookie);
+  assert.equal(workout.response.status, 201);
+  const day = await request('/api/wellness?date=2025-04-12', { cookie: wellnessCookie });
+  assert.equal(day.result.summary.calories, 620);
+  assert.equal(day.result.summary.protein_g, 24.5);
+  assert.equal(day.result.summary.volume_kg, 1920);
+  assert.equal(day.result.week.sessions, 1);
+  assert.equal((await request('/api/wellness?date=2025-02-30', { cookie: wellnessCookie })).response.status, 400);
+  assert.equal((await jsonRequest('/api/wellness/meals', 'POST', {
+    entry_date: '2025-04-12', meal_type: 'brunch', name: 'Invalid', calories: -5,
+  }, wellnessCookie)).response.status, 400);
+  const updateMeal = await jsonRequest(`/api/wellness/meals/${meal.result.id}`, 'PUT', {
+    entry_date: '2025-04-12', meal_type: 'lunch', name: 'Rice, beans and eggs', calories: 720,
+    protein_g: 34, carbs_g: 90, fat_g: 18, notes: '',
+  }, wellnessCookie);
+  assert.equal(updateMeal.response.status, 200);
+  assert.equal(updateMeal.result.calories, 720);
+  assert.deepEqual((await request('/api/wellness?date=2025-04-12', { cookie: otherCookie })).result.meals, []);
+  assert.equal((await request(`/api/wellness/workouts/${workout.result.id}`, { method: 'DELETE', cookie: otherCookie })).response.status, 404);
+  assert.equal((await request(`/api/wellness/workouts/${workout.result.id}`, { method: 'DELETE', cookie: wellnessCookie })).response.status, 200);
+});
+
 test('AI interviewer encrypts provider keys, requires consent, saves private adaptive sessions, and reports early finishes', async () => {
   const aiOwnerCookie = await createAccount('ai_owner_test', 'ai-owner-password-1234');
   const aiOwnerId = db.prepare('SELECT id FROM users WHERE username=?').get('ai_owner_test').id;

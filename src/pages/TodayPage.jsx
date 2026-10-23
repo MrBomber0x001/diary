@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, todayDate } from '../api.js';
+import { api } from '../api.js';
 import { Link } from '../navigation.jsx';
 import { messages } from '../i18n.js';
 import { useFocusSession } from '../components/FocusSessionContext.jsx';
@@ -8,28 +8,49 @@ export default function TodayPage({ language, onUnauthorized }) {
   const [today, setToday] = useState(null);
   const [focusStats, setFocusStats] = useState(null);
   const [weeklyReview, setWeeklyReview] = useState(null);
-  const [dailyNote, setDailyNote] = useState({ title: '', body: '' });
+  const [wellness, setWellness] = useState(null);
+  const [widgets, setWidgets] = useState(['summary', 'focus', 'progress', 'tasks', 'events', 'habits', 'wellness']);
+  const [customizing, setCustomizing] = useState(false);
+  const [widgetError, setWidgetError] = useState('');
   const [error, setError] = useState('');
   const [savingTask, setSavingTask] = useState(null);
-  const [savingNote, setSavingNote] = useState(false);
+  const [savingCheckin, setSavingCheckin] = useState('');
   const [focusMinutes, setFocusMinutes] = useState(25);
   const [focusContext, setFocusContext] = useState('');
   const { session, seconds, busy: focusBusy, error: focusError, startSession, pauseSession, resumeSession, completeSession } = useFocusSession();
   const t = messages[language];
   const load = useCallback(async () => {
     try {
-      const [summary, focus, week, todos, note] = await Promise.all([
+      const [summary, focus, week, todos, wellnessToday, preferences, habits, routines] = await Promise.all([
         api('/today'), api('/focus'), api('/weekly-review'), api('/todos'),
-        api(`/daily-notes?date=${todayDate()}`),
+        api('/wellness'), api('/dashboard/preferences'), api('/habits'), api('/routines'),
       ]);
-      setToday({ ...summary, tasks: todos.filter(row => row.due_date === summary.date && !row.completed) });
+      setToday({
+        ...summary,
+        tasks: todos.filter(row => row.due_date === summary.date && !row.completed),
+        habitItems: habits,
+        routineItems: routines,
+      });
       setFocusStats(focus);
       setWeeklyReview(week);
-      setDailyNote(note);
+      setWellness(wellnessToday);
+      setWidgets(preferences.widgets);
     }
     catch (failure) { if (failure.status === 401) onUnauthorized(); else setError(failure.message); }
   }, [onUnauthorized]);
   useEffect(() => { load(); }, [load]);
+
+  async function toggleWidget(widget) {
+    const next = widgets.includes(widget) ? widgets.filter(item => item !== widget) : [...widgets, widget];
+    setWidgetError('');
+    try {
+      const result = await api('/dashboard/preferences', { method: 'PUT', body: { widgets: next } });
+      setWidgets(result.widgets);
+    } catch (failure) {
+      if (failure.status === 401) onUnauthorized();
+      else setWidgetError(failure.message);
+    }
+  }
 
   async function completeTask(task) {
     setSavingTask(task.id);
@@ -43,16 +64,22 @@ export default function TodayPage({ language, onUnauthorized }) {
     } finally { setSavingTask(null); }
   }
 
-  async function saveDailyNote() {
-    if (!today) return;
-    setSavingNote(true);
+  async function toggleCheckin(kind, item) {
+    const key = `${kind}-${item.id}`;
+    setSavingCheckin(key);
     setError('');
     try {
-      setDailyNote(await api(`/daily-notes/${today.date}`, { method: 'PUT', body: dailyNote }));
+      await api(`/${kind}/${item.id}/log`, {
+        method: 'PUT',
+        body: { completed: !item.completed_today },
+      });
+      await load();
     } catch (failure) {
       if (failure.status === 401) onUnauthorized();
       else setError(failure.message);
-    } finally { setSavingNote(false); }
+    } finally {
+      setSavingCheckin('');
+    }
   }
 
   if (error) return <p className="notice error" role="alert">{error}</p>;
@@ -75,10 +102,33 @@ export default function TodayPage({ language, onUnauthorized }) {
       <section className="welcome">
         <p className="eyebrow">{dateLabel}</p><h1>{t.welcome}</h1>
         <p className="welcome-copy">{language === 'ar' ? 'ابدأ بخطوة صغيرة، وسجّل ما يهمك.' : 'Start with one small step and keep track of what matters.'}</p>
-        <div className="welcome-actions"><Link className="button button-primary" to="/?view=tasks">＋ {language === 'ar' ? 'أضف مهمة' : 'Add a task'}</Link>
-          <Link className="button button-quiet home-daily-note-link" to="/?view=daily-note">✎ {language === 'ar' ? 'المذكرة اليومية' : 'Daily note'}</Link></div>
+        <div className="welcome-actions">
+          <Link className="button button-primary" to="/?view=tasks">＋ {language === 'ar' ? 'أضف مهمة' : 'Add a task'}</Link>
+          <Link className="button home-daily-note-button" to="/?view=daily-note">✎ {language === 'ar' ? 'المذكرة اليومية' : 'Daily note'}</Link>
+          <button className="button welcome-customize-button" type="button" aria-expanded={customizing} onClick={() => setCustomizing(open => !open)}>
+            ⚙ {language === 'ar' ? 'تخصيص لوحة اليوم' : 'Customize dashboard'}
+          </button>
+        </div>
       </section>
-      <section className={`page-card home-focus-card ${session ? 'home-focus-active' : ''}`}>
+      {customizing && <section className="page-card dashboard-customizer">
+        <h2>{language === 'ar' ? 'اختر البطاقات التي تظهر في لوحة اليوم' : 'Choose cards for your daily dashboard'}</h2>
+        {widgetError && <p className="notice error" role="alert">{widgetError}</p>}
+        <div className="dashboard-widget-options">
+          {[
+            ['summary', language === 'ar' ? 'ملخص اليوم' : 'Daily summary'],
+            ['focus', language === 'ar' ? 'جلسة التركيز' : 'Focus session'],
+            ['progress', language === 'ar' ? 'التقدم والإنجازات' : 'Progress & achievements'],
+            ['tasks', language === 'ar' ? 'مهام اليوم' : 'Today’s tasks'],
+            ['events', language === 'ar' ? 'مواعيد اليوم' : 'Today’s events'],
+            ['habits', language === 'ar' ? 'العادات والروتين' : 'Habits & routines'],
+            ['wellness', language === 'ar' ? 'الغذاء واللياقة' : 'Diet & gym'],
+          ].map(([key, label]) => <label className="dashboard-widget-option" key={key}>
+            <input type="checkbox" checked={widgets.includes(key)} onChange={() => toggleWidget(key)} />
+            <span>{label}</span>
+          </label>)}
+        </div>
+      </section>}
+      {widgets.includes('focus') && <section className={`page-card home-focus-card ${session ? 'home-focus-active' : ''}`}>
         <header className="page-heading">
           <div><p className="eyebrow">{language === 'ar' ? 'ابدأ الآن' : 'START NOW'}</p><h2>{language === 'ar' ? 'جلسة تركيز' : 'Focus session'}</h2>
             <p>{session?.contextLabel || (language === 'ar' ? 'ابدأ جلسة مباشرة من هنا، وستبقى مستمرة أثناء تنقلك.' : 'Start here; your session keeps running as you move around the app.')}</p></div>
@@ -105,30 +155,30 @@ export default function TodayPage({ language, onUnauthorized }) {
             ▶ {language === 'ar' ? `ابدأ ${focusMinutes} دقيقة` : `Start ${focusMinutes} minutes`}
           </button>
         </div>}
-      </section>
-      <section className="page-card home-daily-note">
-        <header className="page-heading"><div><p className="eyebrow">{language === 'ar' ? 'مساحة خاصة بك' : 'YOUR SPACE'}</p><h2>{language === 'ar' ? 'المذكرة اليومية' : 'Daily note'}</h2>
-          <p>{dailyNote.updated_at ? `${language === 'ar' ? 'آخر حفظ' : 'Last saved'} · ${dailyNote.updated_at}` : (language === 'ar' ? 'دوّن فكرة أو سجّل يومك دون مغادرة الصفحة.' : 'Capture a thought without leaving the dashboard.')}</p></div>
-          <Link className="button button-quiet" to="/?view=daily-note">{language === 'ar' ? 'السجل الكامل' : 'Full journal'} →</Link></header>
-        <div className="home-daily-note-fields">
-          <input dir="auto" maxLength="200" aria-label={language === 'ar' ? 'عنوان المذكرة اليومية' : 'Daily note title'} value={dailyNote.title || ''}
-            onChange={event => setDailyNote(current => ({ ...current, title: event.target.value }))} placeholder={language === 'ar' ? 'عنوان (اختياري)' : 'Title (optional)'} />
-          <textarea dir="auto" maxLength="50000" aria-label={language === 'ar' ? 'محتوى المذكرة اليومية' : 'Daily note content'} value={dailyNote.body || ''}
-            onChange={event => setDailyNote(current => ({ ...current, body: event.target.value }))} placeholder={language === 'ar' ? 'ما الذي يشغل بالك اليوم؟' : 'What’s on your mind today?'} />
-          <button className="button button-primary" type="button" disabled={savingNote} onClick={saveDailyNote}>
-            {savingNote ? (language === 'ar' ? 'جارٍ الحفظ…' : 'Saving…') : (language === 'ar' ? 'حفظ المذكرة' : 'Save note')}
-          </button>
-        </div>
-      </section>
-      <section className="metric-grid">
+      </section>}
+      {widgets.includes('summary') && <section className="metric-grid">
         {[
-          ['المهام المتبقية', today.tasks.length],
-          ['العادات المنجزة', `${today.habits.completed}/${today.habits.total}`],
-          ['الروتينات المنجزة', `${today.routines.completed}/${today.routines.total}`],
-          ['مواعيد اليوم', today.events.length],
+          [language === 'ar' ? 'المهام المتبقية' : 'Tasks remaining', today.tasks.length],
+          [language === 'ar' ? 'العادات المنجزة' : 'Habits completed', `${today.habits.completed}/${today.habits.total}`],
+          [language === 'ar' ? 'الروتينات المنجزة' : 'Routines completed', `${today.routines.completed}/${today.routines.total}`],
+          [language === 'ar' ? 'مواعيد اليوم' : 'Today’s events', today.events.length],
         ].map(([label, value]) => <article className="metric-card" key={label}><strong>{value}</strong><span>{label}</span></article>)}
-      </section>
-      <section className="page-card gamification-card">
+      </section>}
+      {widgets.includes('wellness') && wellness && <section className="page-card dashboard-wellness-card">
+        <header className="page-heading">
+          <div><p className="eyebrow">{language === 'ar' ? 'صحتك اليوم' : 'YOUR WELLBEING TODAY'}</p><h2>{language === 'ar' ? 'الغذاء واللياقة' : 'Diet & gym'}</h2>
+            <p>{language === 'ar'
+              ? `${wellness.summary.calories} سعرة · ${wellness.workouts.length} تمارين · ${wellness.water_total_ml} مل ماء`
+              : `${wellness.summary.calories} kcal · ${wellness.workouts.length} exercises · ${wellness.water_total_ml} ml water`}</p>
+          </div>
+          <Link className="button button-quiet" to="/?view=wellness">{language === 'ar' ? 'سجّل وجبة أو تمرين' : 'Log a meal or workout'} →</Link>
+        </header>
+        <div className="dashboard-wellness-progress">
+          {wellness.profile.calorie_goal && <Progress label={language === 'ar' ? 'السعرات' : 'Calories'} current={wellness.summary.calories} goal={wellness.profile.calorie_goal} unit="kcal" />}
+          {wellness.profile.water_goal_ml && <Progress label={language === 'ar' ? 'الماء' : 'Water'} current={wellness.water_total_ml} goal={wellness.profile.water_goal_ml} unit="ml" />}
+        </div>
+      </section>}
+      {widgets.includes('progress') && <section className="page-card gamification-card">
         <header className="page-heading">
           <div><p className="eyebrow">{language === 'ar' ? 'إنجازاتك' : 'Your progress'}</p><h2>{language === 'ar' ? 'نقاط الخبرة' : 'Experience points'}</h2></div>
           <Link className="button button-quiet" to="/?view=focus">{language === 'ar' ? 'جلسة تركيز' : 'Focus session'} →</Link>
@@ -144,8 +194,8 @@ export default function TodayPage({ language, onUnauthorized }) {
           <span>{weeklyReview?.tasks.completed || 0} {language === 'ar' ? 'مهام ·' : 'tasks ·'} {weeklyReview?.habits.completed || 0} {language === 'ar' ? 'عادات' : 'habit check-ins'}</span>
         </div>
         <p className="gamification-note">{language === 'ar' ? 'تكسب نقطة خبرة واحدة عن كل دقيقة تركيز مكتملة.' : 'Earn 1 experience point for every completed focus minute.'}</p>
-      </section>
-      <section className="page-card trophy-shelf">
+      </section>}
+      {widgets.includes('progress') && <section className="page-card trophy-shelf">
         <header className="page-heading"><div><p className="eyebrow">{language === 'ar' ? 'إنجازات صغيرة، أثر كبير' : 'Small wins, real momentum'}</p><h2>{language === 'ar' ? 'كؤوسك' : 'Your trophies'}</h2></div>
           <span className="trophy-count">{trophies.filter(trophy => trophy.value >= trophy.target).length} / {trophies.length} {language === 'ar' ? 'مفتوحة' : 'unlocked'}</span></header>
         <div className="trophy-grid">{trophies.map(trophy => {
@@ -160,9 +210,9 @@ export default function TodayPage({ language, onUnauthorized }) {
             <span className="trophy-state" aria-label={unlocked ? (language === 'ar' ? 'تم فتح الكأس' : 'Trophy unlocked') : (language === 'ar' ? 'مقفل' : 'Locked')}>{unlocked ? '✓' : '· · ·'}</span>
           </article>;
         })}</div>
-      </section>
+      </section>}
       <div className="today-agenda-grid">
-        <section className="page-card today-agenda-card">
+        {widgets.includes('tasks') && <section className="page-card today-agenda-card">
           <header className="page-heading"><div><p className="eyebrow">{language === 'ar' ? 'خطوتك التالية' : 'Your next steps'}</p><h2>{language === 'ar' ? 'مهام اليوم' : 'Today’s tasks'}</h2><p>{language === 'ar' ? `${today.tasks.length} مهام متبقية` : `${today.tasks.length} remaining`}</p></div>
             <Link className="button button-quiet" to="/?view=tasks">{language === 'ar' ? 'عرض الكل' : 'View all'} →</Link></header>
           {today.tasks.length ? <div className="today-task-list">{today.tasks.map(task => <article className="today-task-row" key={task.id}>
@@ -170,8 +220,8 @@ export default function TodayPage({ language, onUnauthorized }) {
             <div className="today-task-copy"><strong dir="auto">{task.title}</strong><span>{task.due_time ? `◷ ${task.due_time}` : (language === 'ar' ? 'مجدولة لليوم' : 'Scheduled for today')}</span></div>
             <Link className="today-task-open" to="/?view=tasks" aria-label={language === 'ar' ? 'فتح المهام' : 'Open tasks'}>›</Link>
           </article>)}</div> : <div className="today-empty-state"><span aria-hidden="true">✓</span><p>{language === 'ar' ? 'يومك مفتوح — لا توجد مهام متبقية.' : 'You have room to breathe—no tasks left today.'}</p></div>}
-        </section>
-        <section className="page-card today-agenda-card">
+        </section>}
+        {widgets.includes('events') && <section className="page-card today-agenda-card">
           <header className="page-heading"><div><p className="eyebrow">{language === 'ar' ? 'على جدولك' : 'On your calendar'}</p><h2>{language === 'ar' ? 'مواعيد اليوم' : 'Today’s events'}</h2><p>{language === 'ar' ? `${today.events.length} مواعيد` : `${today.events.length} events`}</p></div>
             <Link className="button button-quiet" to="/?view=calendar">{language === 'ar' ? 'التقويم' : 'Calendar'} →</Link></header>
           {today.events.length ? <div className="today-event-list">{today.events.map(event => <article className="today-event-row" key={`${event.id}-${event.occurrence_start}`}>
@@ -180,8 +230,38 @@ export default function TodayPage({ language, onUnauthorized }) {
               ? <Link className="today-interview-link" to={`/?view=interviews&application=${event.interview_application_id}`}><strong dir="auto">{event.title}</strong><span>{language === 'ar' ? 'فتح طلب التوظيف' : 'Open job application'} ↗</span></Link>
               : <><strong dir="auto">{event.title}</strong>{event.description && <span dir="auto">{event.description}</span>}</>}</div>
           </article>)}</div> : <div className="today-empty-state"><span aria-hidden="true">◷</span><p>{language === 'ar' ? 'لا توجد مواعيد اليوم.' : 'No events scheduled today.'}</p></div>}
-        </section>
+        </section>}
       </div>
+      {widgets.includes('habits') && <section className="page-card dashboard-habits-card">
+        <header className="page-heading"><div><p className="eyebrow">{language === 'ar' ? 'خطواتك اليومية' : 'DAILY CHECK-IN'}</p>
+          <h2>{language === 'ar' ? 'العادات والروتين' : 'Habits & routines'}</h2></div>
+          <Link className="button button-quiet" to="/?view=habits">{language === 'ar' ? 'إدارة العادات' : 'Manage habits'} →</Link>
+        </header>
+        <div className="dashboard-habit-summary">
+          <span>{language === 'ar' ? 'العادات' : 'Habits'} <strong>{today.habits.completed}/{today.habits.total}</strong></span>
+          <span>{language === 'ar' ? 'الروتينات' : 'Routines'} <strong>{today.routines.completed}/{today.routines.total}</strong></span>
+        </div>
+        {today.habitItems.length + today.routineItems.length > 0
+          ? <div className="dashboard-checkin-list">
+            {[...today.habitItems.map(item => ({ ...item, kind: 'habits' })), ...today.routineItems.map(item => ({ ...item, kind: 'routines' }))].map(item => {
+              const key = `${item.kind}-${item.id}`;
+              return <label className="dashboard-checkin" key={key}>
+                <input type="checkbox" checked={Boolean(item.completed_today)} disabled={savingCheckin === key}
+                  onChange={() => toggleCheckin(item.kind, item)} />
+                <span dir="auto">{item.title}</span>
+              </label>;
+            })}
+          </div>
+          : <p className="dashboard-checkin-empty">{language === 'ar' ? 'أضف عادات أو روتيناً لتظهر هنا.' : 'Add habits or routines to see them here.'}</p>}
+      </section>}
     </>
   );
+}
+
+function Progress({ label, current, goal, unit }) {
+  const percent = Math.min(100, Math.round(Number(current || 0) / goal * 100));
+  return <div className="dashboard-wellness-goal">
+    <div><span>{label}</span><strong>{current} / {goal} {unit}</strong></div>
+    <div className="dashboard-goal-track"><span style={{ width: `${percent}%` }} /></div>
+  </div>;
 }

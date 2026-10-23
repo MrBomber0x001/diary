@@ -13,6 +13,7 @@ const createPlanningRouter = require('./planning');
 const createTasksRouter = require('./tasks');
 const createInterviewsRouter = require('./interviews');
 const createAIInterviewsRouter = require('./ai-interviews');
+const createWellnessRouter = require('./wellness');
 
 function registerApiRoutes(app, services) {
   app.use('/api', createPlanningRouter(services.planning));
@@ -23,6 +24,7 @@ function registerApiRoutes(app, services) {
   app.use('/api', createNotesRouter(services.notes));
   app.use('/api', createLearningRouter(services.learning));
   app.use('/api', createFinanceRouter(services.finance));
+  app.use('/api', createWellnessRouter(services.wellness));
   app.use('/api', createFinanceAIRouter(services.financeAI));
   app.use('/api', createBookClubRouter(services.bookClubs));
   app.use('/api', createManagementRouter(services.management));

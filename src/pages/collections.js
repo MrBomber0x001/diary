@@ -78,7 +78,7 @@ export const collections = {
     title: 'الروابط المحفوظة', endpoint: '/bookmarks', singular: 'رابط',
     fields: [
       text('title', 'العنوان', { required: true }), text('url', 'الرابط', { type: 'url', required: true }),
-      text('category', 'التصنيف'), text('image_url', 'رابط الصورة'),
+      text('category', 'المجلد'), text('image_url', 'رابط الصورة'),
       text('note', 'ملاحظة', { type: 'textarea', wide: true }),
     ],
     show: ['url', 'category', 'note'],

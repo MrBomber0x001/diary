@@ -15,6 +15,14 @@ function displayValue(value) {
   return String(value);
 }
 
+function bookmarkHostname(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 export default function CollectionPage({ config, language, onUnauthorized, query = '' }) {
   const [rows, setRows] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -33,6 +41,7 @@ export default function CollectionPage({ config, language, onUnauthorized, query
   const [readingPage, setReadingPage] = useState(1);
   const [readingQuery, setReadingQuery] = useState('');
   const [readingMeta, setReadingMeta] = useState({ total: 0, page: 1, pageSize: 25, pageCount: 0 });
+  const [bookmarkFolder, setBookmarkFolder] = useState('all');
   const [quickTask, setQuickTask] = useState('');
   const [expandedRoutines, setExpandedRoutines] = useState({});
   const [copiedSnippetId, setCopiedSnippetId] = useState(null);
@@ -99,9 +108,12 @@ export default function CollectionPage({ config, language, onUnauthorized, query
         if (taskFilter === 'completed' && !row.completed) return false;
       }
       if (config.viewType === 'applications' && applicationStatus !== 'all' && row.status !== applicationStatus) return false;
+      if (config.endpoint === '/bookmarks' && bookmarkFolder !== 'all' && (row.category || '').trim() !== bookmarkFolder) return false;
       return config.viewType === 'reading' || !term || JSON.stringify(row).toLocaleLowerCase().includes(term);
     });
-  }, [applicationStatus, config.viewType, filter, libraryKind, libraryStatus, rows, taskFilter]);
+  }, [applicationStatus, bookmarkFolder, config.endpoint, config.viewType, filter, libraryKind, libraryStatus, rows, taskFilter]);
+  const bookmarkFolders = useMemo(() => [...new Set(rows.map(row => (row.category || '').trim()).filter(Boolean))]
+    .sort((first, second) => first.localeCompare(second, language)), [language, rows]);
   const taskDate = todayDate();
   const taskTime = new Date().toTimeString().slice(0, 5);
   const taskSummary = config.viewType === 'tasks' ? {
@@ -425,7 +437,7 @@ export default function CollectionPage({ config, language, onUnauthorized, query
     <section className="page-card workspace-section">
       <header className="page-heading">
         <div><h1>{config.title}</h1><p>{language === 'ar' ? `${config.viewType === 'reading' ? readingMeta.total : rows.length} عنصر` : `${config.viewType === 'reading' ? readingMeta.total : rows.length} items`}</p></div>
-        {writeEndpoint && <button className="button button-primary" type="button" onClick={() => setEditing({})}>＋ {config.viewType === 'tasks' ? (language === 'ar' ? 'مهمة جديدة' : 'New task') : t.newItem}</button>}
+        {writeEndpoint && <button className="button button-primary" type="button" onClick={() => setEditing(config.endpoint === '/bookmarks' && bookmarkFolder !== 'all' ? { category: bookmarkFolder } : {})}>＋ {config.viewType === 'tasks' ? (language === 'ar' ? 'مهمة جديدة' : 'New task') : t.newItem}</button>}
       </header>
       {error && <div className="notice error" role="alert">{error}</div>}
       {taskSummary && <div className="task-overview">
@@ -444,6 +456,17 @@ export default function CollectionPage({ config, language, onUnauthorized, query
             ['offers', language === 'ar' ? 'عروض' : 'Offers'],
           ].map(([key, label]) => <article className={`interview-metric interview-metric-${key}`} key={key}><strong>{applicationSummary[key]}</strong><span>{label}</span></article>)}
         </div>}
+      {config.endpoint === '/bookmarks' && <div className="bookmark-folder-tools">
+        <span className="bookmark-folder-label">{language === 'ar' ? 'المجلدات' : 'Folders'}</span>
+        <div className="bookmark-folder-tabs" role="group" aria-label={language === 'ar' ? 'تصفية الروابط حسب المجلد' : 'Filter links by folder'}>
+          {[['all', language === 'ar' ? 'كل الروابط' : 'All links'], ...bookmarkFolders.map(folder => [folder, folder])].map(([folder, label]) =>
+            <button className={`bookmark-folder-tab ${bookmarkFolder === folder ? 'active' : ''}`} type="button" key={folder}
+              aria-pressed={bookmarkFolder === folder} onClick={() => setBookmarkFolder(folder)}>
+              <span aria-hidden="true">{folder === 'all' ? '▦' : '▰'}</span>{label}
+            </button>)}
+        </div>
+        <span>{filteredRows.length} {language === 'ar' ? 'رابط' : 'links'}</span>
+      </div>}
       {config.viewType === 'tasks' && <form className="task-quick-add" onSubmit={addQuickTask}>
         <span aria-hidden="true">＋</span><label className="sr-only" htmlFor="quick-task-title">{language === 'ar' ? 'مهمة سريعة' : 'Quick task'}</label>
         <input id="quick-task-title" dir="auto" value={quickTask} onChange={event => setQuickTask(event.target.value)} placeholder={language === 'ar' ? 'اكتب مهمة واضغط Enter…' : 'Add a task and press Enter…'} />
@@ -543,7 +566,7 @@ export default function CollectionPage({ config, language, onUnauthorized, query
           })}
         </div>
       ) : (
-        <div className={`record-grid ${config.viewType === 'tasks' ? 'task-grid' : ''} ${config.viewType === 'routines' ? 'routine-grid' : ''} ${config.viewType === 'habits' ? 'habit-grid' : ''} ${config.viewType === 'library' ? `library-grid library-${libraryLayout}` : ''} ${config.viewType === 'reading' ? 'reading-grid' : ''}`}>
+        <div className={`record-grid ${config.endpoint === '/bookmarks' ? 'bookmark-grid' : ''} ${config.viewType === 'tasks' ? 'task-grid' : ''} ${config.viewType === 'routines' ? 'routine-grid' : ''} ${config.viewType === 'habits' ? 'habit-grid' : ''} ${config.viewType === 'library' ? `library-grid library-${libraryLayout}` : ''} ${config.viewType === 'reading' ? 'reading-grid' : ''}`}>
           {displayedRows.map(row => (
             config.viewType === 'tasks' ? renderTask(row) : config.viewType === 'routines' ? renderRoutine(row) :
             config.viewType === 'habits' ? renderHabit(row) :
@@ -559,14 +582,20 @@ export default function CollectionPage({ config, language, onUnauthorized, query
                 <ActionIcon action="delete" label={`${t.delete}: ${row.title}`} onClick={() => remove(row)} />
               </footer>
             </article> :
-            <article className="record-card" key={row.id}>
+            <article className={`record-card ${config.endpoint === '/bookmarks' ? 'bookmark-card' : ''}`} key={row.id}>
               {config.linkKey === 'item' ? (
                 <Link to={`/item/${row.id}`}><h3>{row.title}</h3></Link>
               ) : <h3>{row.title || row.name || row.company || row.description || `${config.singular} ${row.id}`}</h3>}
               {config.show?.map(key => row[key] !== undefined && row[key] !== null && row[key] !== '' && (
-                <p key={key}><strong>{key.replaceAll('_', ' ')}: </strong>{displayValue(row[key])}</p>
+                config.endpoint === '/bookmarks' && key === 'url'
+                  ? null
+                  : key === 'category' && config.endpoint === '/bookmarks'
+                  ? <p className="bookmark-card-folder" key={key}><span className="bookmark-folder-tag">▰ {row.category}</span></p>
+                  : <p key={key}><strong>{key.replaceAll('_', ' ')}: </strong>{displayValue(row[key])}</p>
               ))}
-              {row.url && <a href={row.url} target="_blank" rel="noreferrer">{row.url}</a>}
+              {row.url && <a className={config.endpoint === '/bookmarks' ? 'bookmark-card-link' : ''} href={row.url} target="_blank" rel="noreferrer">
+                {config.endpoint === '/bookmarks' ? bookmarkHostname(row.url) : row.url}
+              </a>}
               <div className="record-actions">
                 {config.open && <button className="button button-primary" type="button" onClick={() => config.open(row)}>فتح</button>}
                 {config.action && <button className="button button-quiet" type="button" onClick={() => runAction(row)}>{row[config.action.updateKey] ? (language === 'ar' ? 'تم اليوم ✓' : 'Done today ✓') : config.action.label}</button>}

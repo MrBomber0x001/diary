@@ -20,6 +20,7 @@ import QuranPrayerPage from './pages/QuranPrayerPage.jsx';
 import InterviewPage from './pages/InterviewPage.jsx';
 import BookClubsPage from './pages/BookClubsPage.jsx';
 import TimelinePage from './pages/TimelinePage.jsx';
+import WellnessPage from './pages/WellnessPage.jsx';
 import { collections } from './pages/collections.js';
 
 function resolveRoute(location) {
@@ -121,6 +122,7 @@ export default function App() {
   else if (route.page === 'daily-note') content = <NotesPage section="daily" date={route.date} language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'learning') content = <LearningPage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'finance') content = <FinancePage language={language} onUnauthorized={unauthorized} />;
+  else if (route.page === 'wellness') content = <WellnessPage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'clubs') content = <BookClubsPage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'interviews') content = <InterviewPage language={language} onUnauthorized={unauthorized} />;
   else if (route.page === 'gallery') content = <GalleryPage language={language} onUnauthorized={unauthorized} />;

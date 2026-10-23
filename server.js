@@ -1665,6 +1665,81 @@ function decodeHtmlText(value) {
   });
 }
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS wellness_meals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    entry_date TEXT NOT NULL,
+    meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast','lunch','dinner','snack')),
+    name TEXT NOT NULL,
+    calories INTEGER NOT NULL CHECK (calories BETWEEN 0 AND 20000),
+    protein_g REAL NOT NULL DEFAULT 0 CHECK (protein_g BETWEEN 0 AND 1000),
+    carbs_g REAL NOT NULL DEFAULT 0 CHECK (carbs_g BETWEEN 0 AND 2000),
+    fat_g REAL NOT NULL DEFAULT 0 CHECK (fat_g BETWEEN 0 AND 1000),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_wellness_meals_user_date ON wellness_meals(user_id,entry_date DESC,id DESC);
+  CREATE TABLE IF NOT EXISTS wellness_workouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    entry_date TEXT NOT NULL,
+    exercise TEXT NOT NULL,
+    sets INTEGER NOT NULL DEFAULT 0 CHECK (sets BETWEEN 0 AND 100),
+    reps INTEGER NOT NULL DEFAULT 0 CHECK (reps BETWEEN 0 AND 1000),
+    weight_kg REAL NOT NULL DEFAULT 0 CHECK (weight_kg BETWEEN 0 AND 1000),
+    duration_minutes INTEGER NOT NULL DEFAULT 0 CHECK (duration_minutes BETWEEN 0 AND 1440),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_wellness_workouts_user_date ON wellness_workouts(user_id,entry_date DESC,id DESC);
+  CREATE TABLE IF NOT EXISTS wellness_profiles (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    calorie_goal INTEGER CHECK (calorie_goal IS NULL OR calorie_goal BETWEEN 1 AND 20000),
+    protein_goal_g REAL CHECK (protein_goal_g IS NULL OR protein_goal_g BETWEEN 1 AND 1000),
+    water_goal_ml INTEGER CHECK (water_goal_ml IS NULL OR water_goal_ml BETWEEN 1 AND 20000),
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS wellness_water_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    entry_date TEXT NOT NULL,
+    amount_ml INTEGER NOT NULL CHECK (amount_ml BETWEEN 1 AND 20000),
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_wellness_water_user_date ON wellness_water_logs(user_id,entry_date);
+  CREATE TABLE IF NOT EXISTS wellness_weight_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    entry_date TEXT NOT NULL,
+    weight_kg REAL NOT NULL CHECK (weight_kg BETWEEN 1 AND 1000),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id,entry_date)
+  );
+  CREATE TABLE IF NOT EXISTS wellness_workout_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    exercise TEXT NOT NULL,
+    sets INTEGER NOT NULL DEFAULT 0 CHECK (sets BETWEEN 0 AND 100),
+    reps INTEGER NOT NULL DEFAULT 0 CHECK (reps BETWEEN 0 AND 1000),
+    weight_kg REAL NOT NULL DEFAULT 0 CHECK (weight_kg BETWEEN 0 AND 1000),
+    duration_minutes INTEGER NOT NULL DEFAULT 0 CHECK (duration_minutes BETWEEN 0 AND 1440),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_wellness_templates_user ON wellness_workout_templates(user_id,name);
+  CREATE TABLE IF NOT EXISTS dashboard_preferences (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    widgets_json TEXT NOT NULL DEFAULT '["summary","focus","progress","tasks","events","habits","wellness"]',
+    updated_at TEXT NOT NULL
+  );
+`);
+
 registerApiRoutes(app, {
   planning: { db, now, validateArea, validateGoal, validateProject, ownedArea, ownedGoal, ownedProject },
   activity: { db, now, text, localToday, localTime, validDate },
@@ -1699,6 +1774,7 @@ registerApiRoutes(app, {
   },
   learning: { db, text, now, fs, path, crypto, multer, learningUploadDir: LEARNING_UPLOAD_DIR },
   finance: { db, text, now, localToday },
+  wellness: { db, text, now, localToday },
   financeAI: { db, now, text, decryptSecret, encryptionConfigured, requestProviderCompletion },
   bookClubs: {
     db,

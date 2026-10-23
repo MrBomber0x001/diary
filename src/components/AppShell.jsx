@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { messages } from '../i18n.js';
 import { Link } from '../navigation.jsx';
 import NotificationsCenter from './NotificationsCenter.jsx';
+import QuickNoteWidget from './QuickNoteWidget.jsx';
 
 function PersistentAudioPlayer({ item, onStop, language }) {
   const playerRef = useRef(null);
@@ -29,7 +30,7 @@ const navGroups = [
   [['home', 'today', '⌂'], ['library', 'library', '▤'], ['tasks', 'tasks', '✓'], ['calendar', 'calendar', '▦'], ['timeline', 'timeline', '◷']],
   [['planning', 'planning', '◎'], ['habits', 'habits', '✳'], ['notes', 'notes', '✎'], ['learning', 'learning', '↗']],
   [['finance', 'finance', '$'], ['clubs', 'clubs', '◉'], ['interviews', 'interviews', '◷'], ['gallery', 'gallery', '▧']],
-  [['focus', 'focus', '◌'], ['quran', 'quran', '☾'], ['settings', 'settings', '⚙']],
+  [['wellness', 'wellness', '♡'], ['focus', 'focus', '◌'], ['quran', 'quran', '☾'], ['settings', 'settings', '⚙']],
 ];
 
 export default function AppShell({ user, page, language, themeMode, themeError, audioItem, onAudioStop, onThemeToggle, setLanguage, onLogout, onUnauthorized, children }) {
@@ -73,6 +74,7 @@ export default function AppShell({ user, page, language, themeMode, themeError, 
           {children}
         </main>
       </div>
+      <QuickNoteWidget language={language} onUnauthorized={onUnauthorized} />
     </div>
   );
 }

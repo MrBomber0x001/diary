@@ -1,7 +1,7 @@
 const ar = {
   app: 'مذكرتي', home: 'اليوم', library: 'المكتبة', tasks: 'المهام', calendar: 'التقويم',
   planning: 'التخطيط', habits: 'العادات والروتين', notes: 'القراءة والملاحظات', timeline: 'الخط الزمني', learning: 'التعلم',
-  finance: 'المالية', clubs: 'نوادي القراءة', interviews: 'المقابلات', gallery: 'معرض الصور',
+  finance: 'المالية', wellness: 'الغذاء واللياقة', clubs: 'نوادي القراءة', interviews: 'المقابلات', gallery: 'معرض الصور',
   focus: 'جلسات التركيز', quran: 'القرآن والصلاة', settings: 'الإعدادات والنسخ الاحتياطي',
   signIn: 'تسجيل الدخول', signUp: 'إنشاء حساب', username: 'اسم المستخدم', password: 'كلمة المرور',
   submit: 'حفظ', cancel: 'إلغاء', add: 'إضافة', edit: 'تعديل', delete: 'حذف', search: 'بحث',
@@ -11,7 +11,7 @@ const ar = {
 const en = {
   app: 'Personal Memo', home: 'Today', library: 'Library', tasks: 'Tasks', calendar: 'Calendar',
   planning: 'Planning', habits: 'Habits & routines', notes: 'Reading & notes', timeline: 'Timeline', learning: 'Learning',
-  finance: 'Finance', clubs: 'Book clubs', interviews: 'Interviews', gallery: 'Gallery',
+  finance: 'Finance', wellness: 'Diet & gym', clubs: 'Book clubs', interviews: 'Interviews', gallery: 'Gallery',
   focus: 'Focus sessions', quran: 'Quran & prayer', settings: 'Settings & backups',
   signIn: 'Sign in', signUp: 'Create account', username: 'Username', password: 'Password',
   submit: 'Save', cancel: 'Cancel', add: 'Add', edit: 'Edit', delete: 'Delete', search: 'Search',
